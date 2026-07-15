@@ -46,17 +46,34 @@ export async function waitForPort({
   throw new Error(`timed out waiting for inline-agent backend on ${host}:${port}`);
 }
 
+export function getDevCommands() {
+  return {
+    backend: {
+      command: npmCommand,
+      args: ['run', 'dev:agent'],
+      cwd: rootDir,
+    },
+    web: {
+      command: npmCommand,
+      args: ['run', 'dev:astro'],
+      cwd: webDir,
+    },
+  };
+}
+
 function spawnBackend() {
-  return spawn(npmCommand, ['run', 'dev'], {
-    cwd: rootDir,
+  const { backend } = getDevCommands();
+  return spawn(backend.command, backend.args, {
+    cwd: backend.cwd,
     env: process.env,
     stdio: 'inherit',
   });
 }
 
 function spawnWeb() {
-  return spawn(npmCommand, ['run', 'dev:astro'], {
-    cwd: webDir,
+  const { web } = getDevCommands();
+  return spawn(web.command, web.args, {
+    cwd: web.cwd,
     env: process.env,
     stdio: ['ignore', 'inherit', 'inherit'],
   });

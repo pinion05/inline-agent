@@ -29,6 +29,7 @@ const TMP_DIR = join(
 export interface ShellResult {
   output: string;
   truncated: boolean;
+  eliminatedTokens: number;
   exitCode: number;
 }
 
@@ -119,14 +120,14 @@ export async function runShell(
 
   // No truncation
   if (noLimit) {
-    return { output: raw, truncated: false, exitCode };
+    return { output: raw, truncated: false, eliminatedTokens: 0, exitCode };
   }
 
   const maxChars = options?.maxLength ?? DEFAULT_MAX_CHARS;
   const { text, total } = truncateTail(raw, maxChars);
 
   if (total <= maxChars) {
-    return { output: raw, truncated: false, exitCode };
+    return { output: raw, truncated: false, eliminatedTokens: 0, exitCode };
   }
 
   // Save full output to temp file for LLM self-service.
@@ -136,9 +137,15 @@ export async function runShell(
     ? `\n[truncated. total: ${total} chars. Full output: ${tmpPath}\nUse tail, grep, or head to read specific parts.]`
     : `\n[truncated. total: ${total} chars.]`;
 
+  const output = `...${total - text.replace(/\s/g, "").length} chars truncated...\n${hint}\n\n${text}`;
+
   return {
-    output: `...${total - text.replace(/\s/g, "").length} chars truncated...\n${hint}\n\n${text}`,
+    output,
     truncated: true,
+    eliminatedTokens: Math.max(
+      0,
+      Math.ceil(raw.length / 4) - Math.ceil(output.length / 4)
+    ),
     exitCode,
   };
 }

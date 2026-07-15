@@ -21,6 +21,9 @@ let currentStats: Stats = {
   totalTokens: 0,
   messageCount: 0,
   contextWindow: 0,
+  eliminatedTokens: 0,
+  totalPromptTokens: 0,
+  cacheHitTokens: 0,
   compressionHistory: [],
   lastAction: "idle",
 };
@@ -30,11 +33,19 @@ export interface Stats {
   totalTokens: number;
   messageCount: number;
   contextWindow: number;
-  compressionHistory: { from: number; to: number; time: string }[];
+  eliminatedTokens: number;
+  totalPromptTokens: number;
+  cacheHitTokens: number;
+  compressionHistory: {
+    from: number;
+    to: number;
+    eliminatedTokens: number;
+    time: string;
+  }[];
   lastAction: string;
 }
 
-function estimateTokens(messages: Message[]): number {
+export function estimateTokens(messages: Message[]): number {
   let chars = 0;
   for (const m of messages) {
     chars += m.content?.length ?? 0;
@@ -43,7 +54,7 @@ function estimateTokens(messages: Message[]): number {
   return Math.ceil(chars / 4);
 }
 
-function snapshot() {
+export function getSnapshot() {
   return {
     stats: currentStats,
     messages: currentMessages.map((m) => ({
@@ -60,7 +71,7 @@ function snapshot() {
 }
 
 function broadcast() {
-  const data = JSON.stringify(snapshot());
+  const data = JSON.stringify(getSnapshot());
   for (const res of clients) res.write(`data: ${data}\n\n`);
 }
 
@@ -74,18 +85,41 @@ export function updateContext(
     totalTokens: estimateTokens(messages),
     messageCount: messages.length,
     contextWindow,
+    eliminatedTokens: currentStats.eliminatedTokens,
+    totalPromptTokens: currentStats.totalPromptTokens,
+    cacheHitTokens: currentStats.cacheHitTokens,
     compressionHistory: currentStats.compressionHistory,
     lastAction: action,
   };
   broadcast();
 }
 
-export function recordCompression(from: number, to: number) {
+export function recordEliminatedTokens(eliminatedTokens: number) {
+  currentStats.eliminatedTokens += Math.max(0, eliminatedTokens);
+  broadcast();
+}
+
+export function recordCompression(
+  from: number,
+  to: number,
+  eliminatedTokens: number
+) {
+  const eliminated = Math.max(0, eliminatedTokens);
+  currentStats.eliminatedTokens += eliminated;
   currentStats.compressionHistory.push({
     from,
     to,
+    eliminatedTokens: eliminated,
     time: new Date().toLocaleTimeString(),
   });
+  broadcast();
+}
+
+export function recordUsage(promptTokens: number, cacheHitTokens: number) {
+  const prompt = Math.max(0, promptTokens);
+  const cached = Math.min(prompt, Math.max(0, cacheHitTokens));
+  currentStats.totalPromptTokens += prompt;
+  currentStats.cacheHitTokens += cached;
   broadcast();
 }
 
@@ -101,7 +135,7 @@ export function startServer(): void {
         Connection: "keep-alive",
       });
       res.write(": connected\n\n");
-      res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+      res.write(`data: ${JSON.stringify(getSnapshot())}\n\n`);
       clients.push(res);
       req.on("close", () => {
         clients = clients.filter((c) => c !== res);

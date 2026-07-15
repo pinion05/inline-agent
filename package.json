@@ -8,10 +8,11 @@
     "inline-agent": "dist/index.js"
   },
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "node web/scripts/dev-stack.mjs",
+    "dev:agent": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "tsx test-trajectory.ts"
+    "test": "tsx test-trajectory.ts && tsx --test test/*.test.ts"
   },
   "dependencies": {
     "openai": "^4.0.0"

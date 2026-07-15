@@ -11,7 +11,13 @@ import { runShell } from "./shell.js";
 import { needsCompression, type Message, type UsageInfo } from "./compact.js";
 import { compressTrajectory } from "./trajectory.js";
 import { skillsAnnouncement } from "./skills.js";
-import { updateContext, recordCompression } from "./server.js";
+import {
+  estimateTokens,
+  recordCompression,
+  recordEliminatedTokens,
+  recordUsage,
+  updateContext,
+} from "./server.js";
 
 const SHELL_TOOL = {
   type: "function" as const,
@@ -85,6 +91,10 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
         promptTokens: response.usage.prompt_tokens,
         completionTokens: response.usage.completion_tokens,
       };
+      recordUsage(
+        response.usage.prompt_tokens,
+        response.usage.prompt_tokens_details?.cached_tokens ?? 0
+      );
     }
 
     // Serialize assistant message.
@@ -121,6 +131,7 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
       updateContext(messages, contextWindow, `$ ${command}`);
 
       const result = await runShell(command, { maxLength });
+      recordEliminatedTokens(result.eliminatedTokens);
       messages.push({
         role: "tool",
         tool_call_id: tc.id,
@@ -142,11 +153,16 @@ function maybeCompress(opts: RunOptions): void {
   if (needsCompression(messages, contextWindow, lastUsage)) {
     process.stderr.write("[compressing trajectory...]\n");
     const before = messages.length;
+    const beforeTokens = estimateTokens(messages);
     const compressed = compressTrajectory(messages);
     messages.length = 0;
     messages.push(...compressed);
+    const eliminatedTokens = Math.max(
+      0,
+      beforeTokens - estimateTokens(messages)
+    );
     opts.lastUsage = undefined;
-    recordCompression(before, messages.length);
+    recordCompression(before, messages.length, eliminatedTokens);
     updateContext(messages, contextWindow, `compressed: ${before} → ${messages.length}`);
     process.stderr.write(
       `[trajectory compressed: ${before} → ${messages.length} messages]\n`

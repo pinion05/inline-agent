@@ -18,13 +18,38 @@ interface Stats {
   totalTokens: number;
   messageCount: number;
   contextWindow: number;
-  compressionHistory: { from: number; to: number; time: string }[];
+  eliminatedTokens: number;
+  totalPromptTokens: number;
+  cacheHitTokens: number;
+  compressionHistory: {
+    from: number;
+    to: number;
+    eliminatedTokens: number;
+    time: string;
+  }[];
   lastAction: string;
 }
 
 interface Snapshot {
   stats: Stats;
   messages: MsgData[];
+}
+
+function normalizeSnapshot(next: Snapshot): Snapshot {
+  return {
+    ...next,
+    stats: {
+      ...next.stats,
+      eliminatedTokens: next.stats.eliminatedTokens ?? 0,
+      totalPromptTokens: next.stats.totalPromptTokens ?? 0,
+      cacheHitTokens: next.stats.cacheHitTokens ?? 0,
+      compressionHistory: (next.stats.compressionHistory ?? []).map((item) => ({
+        ...item,
+        eliminatedTokens: item.eliminatedTokens ?? 0,
+      })),
+    },
+    messages: next.messages ?? [],
+  };
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -42,14 +67,23 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function ContextApp() {
   const [snapshot, setSnapshot] = createSignal<Snapshot>({
-    stats: { totalTokens: 0, messageCount: 0, contextWindow: 0, compressionHistory: [], lastAction: 'connecting...' },
+    stats: {
+      totalTokens: 0,
+      messageCount: 0,
+      contextWindow: 0,
+      eliminatedTokens: 0,
+      totalPromptTokens: 0,
+      cacheHitTokens: 0,
+      compressionHistory: [],
+      lastAction: 'connecting...',
+    },
     messages: [],
   });
   let es: EventSource | undefined;
 
   onMount(() => {
     es = new EventSource('/events');
-    es.onmessage = (e) => setSnapshot(JSON.parse(e.data));
+    es.onmessage = (e) => setSnapshot(normalizeSnapshot(JSON.parse(e.data)));
     es.onerror = () => {
       const s = snapshot();
       setSnapshot({ ...s, stats: { ...s.stats, lastAction: 'reconnecting...' } });
@@ -61,6 +95,13 @@ export default function ContextApp() {
   const usagePct = () => {
     const s = snapshot().stats;
     return s.contextWindow > 0 ? (s.totalTokens / s.contextWindow * 100) : 0;
+  };
+
+  const cacheHitPct = () => {
+    const s = snapshot().stats;
+    return s.totalPromptTokens > 0
+      ? (s.cacheHitTokens / s.totalPromptTokens) * 100
+      : null;
   };
 
   const isCompressed = (m: MsgData) =>
@@ -78,6 +119,21 @@ export default function ContextApp() {
           <Stat label="Tokens" value={snapshot().stats.totalTokens.toLocaleString()} />
           <Stat label="Messages" value={String(snapshot().stats.messageCount)} />
           <Stat label="Context Window" value={snapshot().stats.contextWindow.toLocaleString()} />
+          <Stat
+            label="소거한 불필요토큰"
+            value={snapshot().stats.eliminatedTokens.toLocaleString()}
+            color="#f0883e"
+          />
+          <Stat
+            label="캐시히트"
+            value={snapshot().stats.cacheHitTokens.toLocaleString()}
+            color="#3fb950"
+          />
+          <Stat
+            label="전체 캐시 비율"
+            value={cacheHitPct() === null ? '—' : `${cacheHitPct()!.toFixed(1)}%`}
+            color="#3fb950"
+          />
           <Stat
             label="Usage"
             value={`${usagePct().toFixed(1)}%`}
@@ -114,7 +170,7 @@ export default function ContextApp() {
           <For each={snapshot().stats.compressionHistory}>
             {(c) => (
               <div style={{ color: '#f0883e', 'font-size': '11px', opacity: 0.8 }}>
-                {c.time}: {c.from} → {c.to} messages
+                {c.time}: {c.from} → {c.to} messages · -{c.eliminatedTokens.toLocaleString()} tokens
               </div>
             )}
           </For>

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
-import { runDevStack } from '../scripts/dev-stack.mjs';
+import { getDevCommands, runDevStack } from '../scripts/dev-stack.mjs';
 
 function child(name) {
   return {
@@ -18,6 +19,34 @@ function child(name) {
     },
   };
 }
+
+test('dashboard shows the cumulative number of eliminated tokens', () => {
+  const component = readFileSync(
+    new URL('../src/components/ContextApp.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(component, /label="소거한 불필요토큰"/);
+  assert.match(component, /snapshot\(\)\.stats\.eliminatedTokens/);
+  assert.match(component, /label="캐시히트"/);
+  assert.match(component, /snapshot\(\)\.stats\.cacheHitTokens/);
+  assert.match(component, /label="전체 캐시 비율"/);
+  assert.match(component, /s\.cacheHitTokens \/ s\.totalPromptTokens/);
+  assert.match(component, /setSnapshot\(normalizeSnapshot/);
+  assert.match(component, /eliminatedTokens: next\.stats\.eliminatedTokens \?\? 0/);
+});
+
+test('root dev command launches the combined CLI and web stack without recursion', () => {
+  const rootPackage = JSON.parse(
+    readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+  );
+  const commands = getDevCommands();
+
+  assert.equal(rootPackage.scripts.dev, 'node web/scripts/dev-stack.mjs');
+  assert.equal(rootPackage.scripts['dev:agent'], 'tsx src/index.ts');
+  assert.deepEqual(commands.backend.args, ['run', 'dev:agent']);
+  assert.deepEqual(commands.web.args, ['run', 'dev:astro']);
+});
 
 test('starts the backend and waits for SSE before starting Astro', async () => {
   const calls = [];
