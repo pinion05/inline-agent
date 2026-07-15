@@ -6,7 +6,6 @@
  * Rule-based trajectory compression.
  *
  * Defaults to Z.AI Coding Plan (glm-5.2).
- * Works with any OpenAI-compatible provider.
  */
 import OpenAI from "openai";
 import * as readline from "node:readline";
@@ -38,26 +37,6 @@ function loadConfig(): Config | null {
 function saveConfig(config: Config): void {
   mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-}
-
-/** Line queue: prevents losing lines when readline emits faster than we listen. */
-function createLineReader(rl: readline.Interface) {
-  const queue: string[] = [];
-  const waiters: ((line: string) => void)[] = [];
-  rl.on("line", (line: string) => {
-    if (waiters.length > 0) {
-      waiters.shift()!(line);
-    } else {
-      queue.push(line);
-    }
-  });
-  return function ask(q: string): Promise<string> {
-    process.stderr.write(q);
-    if (queue.length > 0) {
-      return Promise.resolve(queue.shift()!.trim());
-    }
-    return new Promise((resolve) => waiters.push((l) => resolve(l.trim())));
-  };
 }
 
 function guessContextWindow(model: string): number {
@@ -92,44 +71,10 @@ function configToConnect(config: Config): {
   };
 }
 
-async function setupWizard(rl: readline.Interface): Promise<Config> {
-  const ask = createLineReader(rl);
-  process.stderr.write(
-    "\n╔══════════════════════════════════════════╗\n" +
-      "║        inline-agent 첫 실행 설정          ║\n" +
-      "╚══════════════════════════════════════════╝\n\n"
-  );
-  process.stderr.write("제공자 선택:\n");
-  process.stderr.write("  1. Z.AI Coding Plan (glm-5.2, 기본)\n");
-  process.stderr.write("  2. OpenAI\n");
-  process.stderr.write("  3. 커스텀 (OpenAI-compatible)\n");
-
-  const choice = await ask("\n선택 [1]: ");
-
-  let config: Config;
-  if (choice === "2") {
-    const key = await ask("OpenAI API Key: ");
-    config = { provider: "openai", apiKey: key };
-  } else if (choice === "3") {
-    const key = await ask("API Key: ");
-    const url = await ask("Base URL: ");
-    const model = await ask("Model: ");
-    config = { provider: "custom", apiKey: key, baseURL: url, model };
-  } else {
-    const key = await ask("Z.AI API Key: ");
-    config = { provider: "zai", apiKey: key };
-  }
-
-  saveConfig(config);
-  process.stderr.write(`\n설정 저장됨: ${CONFIG_FILE}\n\n`);
-  return config;
-}
-
 async function main() {
   const zaiKey = process.env.ZAI_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
 
-  // Resolve connection info
   let baseURL: string | undefined;
   let apiKey: string;
   let model: string;
@@ -146,7 +91,7 @@ async function main() {
     apiKey = openaiKey;
     model = process.env.INLINE_MODEL ?? "gpt-5";
   } else {
-    // No env vars — check config file or run wizard
+    // Check config file
     const config = loadConfig();
     if (config) {
       const c = configToConnect(config);
@@ -155,18 +100,10 @@ async function main() {
       model = c.model;
     } else {
       // First run — interactive setup
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stderr,
-      });
-      const newConfig = await setupWizard(rl);
-      const c = configToConnect(newConfig);
+      const c = await setupWizard();
       baseURL = c.baseURL;
       apiKey = c.apiKey;
       model = c.model;
-      // Don't close rl — reuse for agent loop
-      startAgent(rl, baseURL, apiKey, model);
-      return;
     }
   }
 
@@ -176,24 +113,64 @@ async function main() {
     process.exit(1);
   }
 
-  startAgent(undefined, baseURL, apiKey, model);
+  startAgent(baseURL, apiKey, model);
 }
 
-function startAgent(
-  reusedRl: readline.Interface | undefined,
-  baseURL: string | undefined,
-  apiKey: string,
-  model: string
-) {
+async function setupWizard(): Promise<{ baseURL?: string; apiKey: string; model: string }> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stderr,
+  });
+
+  const ask = (q: string) =>
+    new Promise<string>((resolve) => rl.question(q, (a) => resolve(a.trim())));
+
+  process.stderr.write(
+    "\n╔══════════════════════════════════════════╗\n" +
+      "║        inline-agent 첫 실행 설정          ║\n" +
+      "╚══════════════════════════════════════════╝\n\n"
+  );
+  process.stderr.write("제공자 선택:\n");
+  process.stderr.write("  1. Z.AI Coding Plan (glm-5.2, 기본)\n");
+  process.stderr.write("  2. OpenAI\n");
+  process.stderr.write("  3. 커스텀 (OpenAI-compatible)\n\n");
+
+  const choice = await ask("선택 [1]: ");
+
+  let config: Config;
+  if (choice === "2") {
+    const key = await ask("OpenAI API Key: ");
+    config = { provider: "openai", apiKey: key };
+  } else if (choice === "3") {
+    const key = await ask("API Key: ");
+    const url = await ask("Base URL: ");
+    const model = await ask("Model: ");
+    config = { provider: "custom", apiKey: key, baseURL: url, model };
+  } else {
+    const key = await ask("Z.AI API Key: ");
+    config = { provider: "zai", apiKey: key };
+  }
+
+  rl.close();
+
+  saveConfig(config);
+  process.stderr.write(`\n설정 저장됨: ${CONFIG_FILE}\n\n`);
+
+  return configToConnect(config);
+}
+
+function startAgent(baseURL: string | undefined, apiKey: string, model: string) {
   const contextWindow = guessContextWindow(model);
   const client = baseURL
     ? new OpenAI({ baseURL, apiKey })
     : new OpenAI({ apiKey });
 
   const messages: Message[] = [];
-  const rl =
-    reusedRl ??
-    readline.createInterface({ input: process.stdin, output: process.stderr });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stderr,
+    prompt: ">>> ",
+  });
 
   const provider = baseURL?.includes("z.ai")
     ? "Z.AI"
@@ -203,7 +180,6 @@ function startAgent(
   process.stderr.write(
     `inline-agent | ${provider} ${model} | ctx=${contextWindow.toLocaleString()}\n\n`
   );
-  rl.setPrompt(">>> ");
   rl.prompt();
 
   const opts = {

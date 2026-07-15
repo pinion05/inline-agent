@@ -95,7 +95,8 @@ export async function runShell(
     const { stdout: out, stderr: err } = await execAsync(command, {
       timeout,
       maxBuffer: 10 * 1024 * 1024,
-      shell: process.env.SHELL ?? "/bin/bash",
+      shell: "/bin/sh",
+      env: { ...process.env, PS1: "", PS2: "" },
     });
     stdout = out;
     stderr = err;
