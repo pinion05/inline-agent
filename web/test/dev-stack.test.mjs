@@ -34,6 +34,11 @@ test('dashboard shows the cumulative number of eliminated tokens', () => {
   assert.match(component, /s\.cacheHitTokens \/ s\.totalPromptTokens/);
   assert.match(component, /setSnapshot\(normalizeSnapshot/);
   assert.match(component, /eliminatedTokens: next\.stats\.eliminatedTokens \?\? 0/);
+  assert.match(component, /실제 LLM 컨텍스트/);
+  assert.match(component, /<For each=\{snapshot\(\)\.apiMessages\}>/);
+  assert.match(component, /props\.msg\.content/);
+  assert.match(component, /props\.msg\.tool_call_id/);
+  assert.match(component, /JSON\.stringify\(props\.msg\.tool_calls/);
 });
 
 test('root dev command launches the combined CLI and web stack without recursion', () => {

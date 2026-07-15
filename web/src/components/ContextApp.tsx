@@ -6,12 +6,11 @@ interface ToolCall {
   function: { name: string; arguments: string };
 }
 
-interface MsgData {
+interface ApiMessage {
   role: string;
   content: string;
-  toolCalls?: ToolCall[];
-  toolCallId?: string;
-  tokens: number;
+  tool_call_id?: string;
+  tool_calls?: ToolCall[];
 }
 
 interface Stats {
@@ -32,7 +31,7 @@ interface Stats {
 
 interface Snapshot {
   stats: Stats;
-  messages: MsgData[];
+  apiMessages: ApiMessage[];
 }
 
 function normalizeSnapshot(next: Snapshot): Snapshot {
@@ -48,7 +47,7 @@ function normalizeSnapshot(next: Snapshot): Snapshot {
         eliminatedTokens: item.eliminatedTokens ?? 0,
       })),
     },
-    messages: next.messages ?? [],
+    apiMessages: next.apiMessages ?? [],
   };
 }
 
@@ -77,7 +76,7 @@ export default function ContextApp() {
       compressionHistory: [],
       lastAction: 'connecting...',
     },
-    messages: [],
+    apiMessages: [],
   });
   let es: EventSource | undefined;
 
@@ -92,9 +91,14 @@ export default function ContextApp() {
 
   onCleanup(() => es?.close());
 
+  const apiTokens = () => snapshot().apiMessages.reduce(
+    (total, message) => total + estimateMessageTokens(message),
+    0,
+  );
+
   const usagePct = () => {
-    const s = snapshot().stats;
-    return s.contextWindow > 0 ? (s.totalTokens / s.contextWindow * 100) : 0;
+    const contextWindow = snapshot().stats.contextWindow;
+    return contextWindow > 0 ? (apiTokens() / contextWindow * 100) : 0;
   };
 
   const cacheHitPct = () => {
@@ -103,9 +107,6 @@ export default function ContextApp() {
       ? (s.cacheHitTokens / s.totalPromptTokens) * 100
       : null;
   };
-
-  const isCompressed = (m: MsgData) =>
-    m.role === 'assistant' && !m.toolCalls?.length && !m.toolCallId && snapshot().stats.compressionHistory.length > 0;
 
   return (
     <div style={{ padding: '20px', 'max-width': '1200px', margin: '0 auto' }}>
@@ -116,8 +117,8 @@ export default function ContextApp() {
         'border-bottom': '1px solid #30363d', 'margin-bottom': '16px',
       }}>
         <div style={{ display: 'flex', gap: '32px', 'flex-wrap': 'wrap' }}>
-          <Stat label="Tokens" value={snapshot().stats.totalTokens.toLocaleString()} />
-          <Stat label="Messages" value={String(snapshot().stats.messageCount)} />
+          <Stat label="Tokens" value={apiTokens().toLocaleString()} />
+          <Stat label="Messages" value={String(snapshot().apiMessages.length)} />
           <Stat label="Context Window" value={snapshot().stats.contextWindow.toLocaleString()} />
           <Stat
             label="소거한 불필요토큰"
@@ -177,18 +178,27 @@ export default function ContextApp() {
         </div>
       </Show>
 
-      {/* Messages */}
-      <div>
-        <For each={snapshot().messages}>
-          {(msg, i) => (
-            <MessageCard
-              msg={msg}
-              index={i()}
-              compressed={isCompressed(msg)}
-            />
-          )}
-        </For>
+      {/* Exact API context */}
+      <div style={{ 'margin-bottom': '12px' }}>
+        <div style={{ color: '#58a6ff', 'font-size': '15px', 'font-weight': '700' }}>
+          실제 LLM 컨텍스트
+        </div>
+        <div style={{ color: '#8b949e', 'font-size': '11px', 'margin-top': '3px' }}>
+          마지막 API 호출 직전에 캡처한 messages 원문 전체
+        </div>
       </div>
+      <Show
+        when={snapshot().apiMessages.length > 0}
+        fallback={(
+          <div style={{ padding: '20px', color: '#8b949e', background: '#161b22', 'border-radius': '8px' }}>
+            아직 API에 전송된 컨텍스트가 없습니다.
+          </div>
+        )}
+      >
+        <For each={snapshot().apiMessages}>
+          {(msg, i) => <ApiMessageCard msg={msg} index={i()} />}
+        </For>
+      </Show>
     </div>
   );
 }
@@ -210,93 +220,81 @@ function Stat(props: { label: string; value: string; color?: string }) {
   );
 }
 
-function MessageCard(props: { msg: MsgData; index: number; compressed: boolean }) {
+function estimateMessageTokens(message: ApiMessage): number {
+  return Math.ceil(JSON.stringify(message).length / 4);
+}
+
+function ApiMessageCard(props: { msg: ApiMessage; index: number }) {
   const color = () => ROLE_COLORS[props.msg.role] ?? '#8b949e';
   const label = () => ROLE_LABELS[props.msg.role] ?? props.msg.role.toUpperCase();
 
   return (
     <div style={{
-      'margin-bottom': '8px', padding: '12px 16px',
+      'margin-bottom': '10px', padding: '14px 16px',
       'border-radius': '8px',
-      'border-left': `3px solid ${props.compressed ? '#f0883e' : color()}`,
-      background: props.compressed ? '#1a1510' : '#161b22',
-      opacity: props.compressed ? '0.9' : '1',
-      animation: 'fadeIn 0.2s ease',
+      'border-left': `3px solid ${color()}`,
+      background: '#161b22',
     }}>
-      {/* Role header */}
-      <div style={{
-        display: 'flex', 'align-items': 'center', gap: '8px',
-        'margin-bottom': '6px',
-      }}>
-        <span style={{
-          'font-size': '10px', 'text-transform': 'uppercase',
-          color: '#8b949e', 'font-weight': '600',
-        }}>
-          {label()}
+      <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', 'margin-bottom': '10px' }}>
+        <span style={{ color: '#8b949e', 'font-size': '10px', 'font-weight': '600' }}>
+          #{props.index + 1} {label()}
         </span>
         <span style={{
           'font-size': '9px', padding: '1px 6px', 'border-radius': '10px',
           background: '#21262d', color: '#8b949e',
         }}>
-          ~{props.msg.tokens} tok
+          ~{estimateMessageTokens(props.msg)} tok
         </span>
-        <Show when={props.compressed}>
-          <span style={{
-            'font-size': '9px', padding: '1px 6px', 'border-radius': '10px',
-            background: '#3d2b1f', color: '#f0883e',
-          }}>
-            COMPRESSED
-          </span>
-        </Show>
-        <Show when={props.msg.toolCalls?.length}>
-          <span style={{
-            'font-size': '9px', padding: '1px 6px', 'border-radius': '10px',
-            background: '#1a3a5c', color: '#58a6ff',
-          }}>
-            +{props.msg.toolCalls!.length} tool_call
-          </span>
-        </Show>
-        <Show when={props.msg.toolCallId}>
-          <span style={{
-            'font-size': '9px', padding: '1px 6px', 'border-radius': '10px',
-            background: '#3d3515', color: '#d29922',
-          }}>
-            tool result
-          </span>
-        </Show>
       </div>
 
-      {/* Content */}
-      <Show when={props.msg.content}>
-        <div style={{
-          'white-space': 'pre-wrap', 'word-break': 'break-word',
-          'line-height': '1.6', 'font-size': '13px',
-          'max-height': '400px', 'overflow-y': 'auto',
-        }}>
-          {props.msg.content}
-        </div>
+      <Show when={props.msg.content !== undefined}>
+        <FieldLabel>content 원문</FieldLabel>
+        <pre style={{
+          margin: '4px 0 10px', padding: '10px 12px',
+          background: '#0d1117', color: '#c9d1d9',
+          'border-radius': '6px', 'white-space': 'pre-wrap',
+          'word-break': 'break-word', 'font-size': '12px',
+          'line-height': '1.55', 'max-height': '500px', overflow: 'auto',
+        }}>{props.msg.content}</pre>
       </Show>
 
-      {/* Tool calls */}
-      <Show when={props.msg.toolCalls?.length}>
-        <For each={props.msg.toolCalls}>
-          {(tc) => (
-            <div style={{
-              'margin-top': '8px', padding: '8px 12px',
-              background: '#0d1117', 'border-radius': '6px',
-              'font-size': '12px', 'border': '1px solid #30363d',
-            }}>
-              <span style={{ color: '#d29922' }}>$ </span>
-              <span style={{ color: '#c9d1d9' }}>
-                {(() => {
-                  try { return JSON.parse(tc.function.arguments).command ?? '(unknown)'; }
-                  catch { return tc.function.arguments; }
-                })()}
-              </span>
-            </div>
-          )}
-        </For>
+      <Show when={props.msg.tool_call_id !== undefined}>
+        <FieldLabel>tool_call_id 원문</FieldLabel>
+        <pre style={{
+          margin: '4px 0 10px', padding: '10px 12px',
+          background: '#0d1117', color: '#d29922',
+          'border-radius': '6px', 'white-space': 'pre-wrap',
+          'word-break': 'break-all', 'font-size': '12px',
+        }}>{props.msg.tool_call_id}</pre>
       </Show>
+
+      <Show when={props.msg.tool_calls !== undefined}>
+        <FieldLabel>tool_calls 원문 JSON</FieldLabel>
+        <pre style={{
+          margin: '4px 0 10px', padding: '10px 12px',
+          background: '#0d1117', color: '#58a6ff',
+          'border-radius': '6px', 'white-space': 'pre-wrap',
+          'word-break': 'break-word', 'font-size': '12px',
+          'line-height': '1.55', 'max-height': '600px', overflow: 'auto',
+        }}>{JSON.stringify(props.msg.tool_calls, null, 2)}</pre>
+      </Show>
+
+      <FieldLabel>메시지 전체 원문 JSON</FieldLabel>
+      <pre style={{
+        margin: '4px 0 0', padding: '10px 12px',
+        background: '#090c10', color: '#8b949e',
+        'border-radius': '6px', 'white-space': 'pre-wrap',
+        'word-break': 'break-word', 'font-size': '11px',
+        'line-height': '1.5', 'max-height': '600px', overflow: 'auto',
+      }}>{JSON.stringify(props.msg, null, 2)}</pre>
+    </div>
+  );
+}
+
+function FieldLabel(props: { children: any }) {
+  return (
+    <div style={{ color: '#8b949e', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase' }}>
+      {props.children}
     </div>
   );
 }

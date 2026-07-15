@@ -13,6 +13,7 @@ import { compressTrajectory } from "./trajectory.js";
 import { skillsAnnouncement } from "./skills.js";
 import {
   estimateTokens,
+  recordApiContext,
   recordCompression,
   recordEliminatedTokens,
   recordUsage,
@@ -75,6 +76,7 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     updateContext(messages, contextWindow, `LLM call #${i + 1}...`);
+    recordApiContext(messages);
 
     const response = await client.chat.completions.create({
       model,

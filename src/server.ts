@@ -17,6 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const WEB_DIST = join(__dirname, "..", "web", "dist");
 
 let currentMessages: Message[] = [];
+let lastApiMessages: Message[] = [];
 let currentStats: Stats = {
   totalTokens: 0,
   messageCount: 0,
@@ -57,6 +58,7 @@ export function estimateTokens(messages: Message[]): number {
 export function getSnapshot() {
   return {
     stats: currentStats,
+    apiMessages: lastApiMessages,
     messages: currentMessages.map((m) => ({
       role: m.role,
       content: m.content ?? "",
@@ -73,6 +75,11 @@ export function getSnapshot() {
 function broadcast() {
   const data = JSON.stringify(getSnapshot());
   for (const res of clients) res.write(`data: ${data}\n\n`);
+}
+
+export function recordApiContext(messages: Message[]) {
+  lastApiMessages = structuredClone(messages);
+  broadcast();
 }
 
 export function updateContext(
