@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import type { AgentEvent } from "../src/agent-events.js";
 import { run } from "../src/loop.js";
 import { getSnapshot } from "../src/server.js";
 import type { Message } from "../src/compact.js";
@@ -10,6 +11,7 @@ test("captures the exact request-only system prompt, messages, and tools", async
   let sentMessages: Message[] = [];
   let sentTools: unknown[] = [];
   let sentReasoning: string | undefined;
+  let projectionEvent: Extract<AgentEvent, { type: "context-projection" }> | undefined;
   const client = {
     chat: {
       completions: {
@@ -41,6 +43,9 @@ test("captures the exact request-only system prompt, messages, and tools", async
       messages,
       skillsInjected: true,
       systemPromptLoader: async () => "exact system prompt\n",
+      onEvent: (event) => {
+        if (event.type === "context-projection") projectionEvent = event;
+      },
     },
     "exact user input",
   );
@@ -53,6 +58,13 @@ test("captures the exact request-only system prompt, messages, and tools", async
   assert.equal(snapshot.apiReasoningEffort, "high");
   assert.equal(snapshot.stats.configuredRawActions, 3);
   assert.equal(snapshot.stats.effectiveRawActions, 3);
+  assert.equal(
+    projectionEvent?.estimatedTokens,
+    sentMessages.reduce(
+      (total, message) => total + Math.ceil(JSON.stringify(message).length / 4),
+      Math.ceil(JSON.stringify(sentTools).length / 4),
+    ),
+  );
   assert.deepEqual(sentMessages, [
     { role: "system", content: "exact system prompt\n" },
     { role: "user", content: "exact user input" },

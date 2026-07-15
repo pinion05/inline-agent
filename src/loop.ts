@@ -120,6 +120,12 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
       tools: [SHELL_TOOL],
       reasoning_effort: reasoningEffort as any,
     };
+    emit(opts, {
+      type: "context-projection",
+      estimatedTokens: projection.estimatedTokens,
+      configuredRawActions: projection.configuredRawActions,
+      effectiveRawActions: projection.effectiveRawActions,
+    });
     recordApiContext(projection.apiMessages, request.tools, {
       model,
       reasoningEffort,

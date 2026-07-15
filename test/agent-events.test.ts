@@ -70,21 +70,29 @@ test("emits ordered run, tool, and assistant events without terminal writes", as
 
   assert.deepEqual(events.map((event) => event.type), [
     "run-start",
+    "context-projection",
     "tool-start",
     "tool-complete",
+    "context-projection",
     "assistant-complete",
   ]);
-  assert.deepEqual(events[1], {
+  assert.deepEqual(events[2], {
     type: "tool-start",
     id: "call_1",
     name: "shell",
     command: "printf event-output",
   });
-  assert.equal(events[2].type, "tool-complete");
-  if (events[2].type === "tool-complete") {
-    assert.equal(events[2].output, "event-output\n[exit: 0]");
+  assert.equal(events[3].type, "tool-complete");
+  if (events[3].type === "tool-complete") {
+    assert.equal(events[3].output, "event-output\n[exit: 0]");
   }
-  assert.deepEqual(events[3], {
+  assert.equal(events[4].type, "context-projection");
+  if (events[4].type === "context-projection") {
+    assert.ok(events[4].estimatedTokens > 0);
+    assert.equal(events[4].configuredRawActions, 3);
+    assert.equal(events[4].effectiveRawActions, 3);
+  }
+  assert.deepEqual(events[5], {
     type: "assistant-complete",
     content: "finished",
   });
@@ -129,7 +137,9 @@ test("passes AbortSignal to the API and emits interrupted instead of error", asy
 
   await assert.rejects(running, (error: Error) => error.name === "AbortError");
   assert.equal(receivedSignal, controller.signal);
-  assert.deepEqual(events.map((event) => event.type), ["run-start", "interrupted"]);
+  assert.deepEqual(events.map((event) => event.type), [
+    "run-start", "context-projection", "interrupted",
+  ]);
 });
 
 test("keeps tool-call trajectory valid when interruption occurs during a tool round", async () => {
@@ -190,7 +200,7 @@ test("keeps tool-call trajectory valid when interruption occurs during a tool ro
     { id: "call_2", content: "[interrupted by user]" },
   ]);
   assert.deepEqual(events.map((event) => event.type), [
-    "run-start", "tool-start", "interrupted",
+    "run-start", "context-projection", "tool-start", "interrupted",
   ]);
 });
 
@@ -222,8 +232,8 @@ test("emits an error event and preserves the thrown API failure", async () => {
     failure,
   );
 
-  assert.deepEqual(events, [
-    { type: "run-start", input: "fail" },
-    { type: "error", message: "provider failed" },
+  assert.deepEqual(events.map((event) => event.type), [
+    "run-start", "context-projection", "error",
   ]);
+  assert.deepEqual(events.at(-1), { type: "error", message: "provider failed" });
 });

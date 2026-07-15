@@ -32,7 +32,7 @@ export class ChatView implements Component {
   private contextWindow: number;
   private status: RunStatus = "ready";
   private queueLength = 0;
-  private contextTokens = 0;
+  private apiContextTokens = 0;
   private transcriptEntries = 0;
 
   constructor(
@@ -108,11 +108,11 @@ export class ChatView implements Component {
   setStatus(
     status: RunStatus,
     queueLength: number = this.queueLength,
-    contextTokens: number = this.contextTokens,
+    apiContextTokens: number = this.apiContextTokens,
   ): void {
     this.status = status;
     this.queueLength = queueLength;
-    this.contextTokens = contextTokens;
+    this.apiContextTokens = apiContextTokens;
     this.updateChrome();
   }
 
@@ -157,7 +157,7 @@ export class ChatView implements Component {
     );
 
     const usage = this.contextWindow > 0
-      ? `${((this.contextTokens / this.contextWindow) * 100).toFixed(1)}%`
+      ? `${((this.apiContextTokens / this.contextWindow) * 100).toFixed(1)}%`
       : "—";
     const statusColor = this.status === "error"
       ? tuiTheme.error
@@ -167,7 +167,7 @@ export class ChatView implements Component {
     this.footer.setText(
       statusColor(`● ${this.status}`)
       + tuiTheme.muted(
-        ` │ ctx ${usage} │ raw ${this.config.recentRawToolActions} │ limit ${formatCharacterLimit(this.config.toolOutputSafetyLimit)} │ queue ${this.queueLength} │ /settings`,
+        ` │ api ctx ${usage} │ raw ${this.config.recentRawToolActions} │ limit ${formatCharacterLimit(this.config.toolOutputSafetyLimit)} │ queue ${this.queueLength} │ /settings`,
       ),
     );
     this.tui.requestRender();

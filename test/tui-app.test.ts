@@ -263,6 +263,33 @@ test("handles settings, clear, and exit commands without sending them", async ()
   assert.equal(terminal.stopped, true);
 });
 
+test("shows the projected API context percentage instead of canonical memory", async () => {
+  const terminal = new FakeTerminal();
+  const app = new InlineAgentApp({
+    terminal,
+    initialConfig: config,
+    createClient: () => ({}) as any,
+    runAgent: async (opts, input) => {
+      opts.messages.push({ role: "user", content: input });
+      opts.messages.push({ role: "tool", content: "x".repeat(348_000) });
+      opts.onEvent?.({
+        type: "context-projection",
+        estimatedTokens: 14_067,
+        configuredRawActions: 3,
+        effectiveRawActions: 3,
+      });
+      return "done";
+    },
+  });
+  app.start();
+
+  await app.submit("measure");
+
+  const output = stripAnsi(app.chatView!.render(80).join("\n"));
+  assert.match(output, /api ctx 1\.4%/);
+  assert.equal(output.includes("api ctx 8.7%"), false);
+});
+
 test("applies new runtime settings without clearing messages", async () => {
   const terminal = new FakeTerminal();
   const saved: AgentConfig[] = [];

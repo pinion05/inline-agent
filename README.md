@@ -108,7 +108,7 @@ AgentDiet가 LLM에게 `erase` 도구를 줬다.
 npm run dev
 ```
 
-브라우저에서 [http://localhost:7878/](http://localhost:7878/)을 열면 마지막 LLM API 호출 직전의 시스템 프롬프트, tool 정의, 컨텍스트 원문 전체, 활성 model과 `reasoning_effort`, 현재 토큰 사용량, 안전 상한으로 잘린 토큰, 현재 요청 projection으로 압축한 토큰, 설정/실제 raw action 수, 캐시 히트 비율을 실시간으로 확인할 수 있다.
+브라우저에서 [http://localhost:7878/](http://localhost:7878/)을 열면 마지막 LLM API 호출 직전의 시스템 프롬프트, tool 정의, 컨텍스트 원문 전체, 활성 model과 `reasoning_effort`, 현재 토큰 사용량, 안전 상한으로 잘린 토큰, 현재 요청 projection으로 압축한 토큰, 설정/실제 raw action 수, 캐시 히트 비율을 실시간으로 확인할 수 있다. TUI의 `api ctx`도 동일한 마지막 API request projection과 동일한 토큰 추정식을 사용한다.
 
 ## Retained-mode TUI와 provider 설정
 

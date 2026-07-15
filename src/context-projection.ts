@@ -1,4 +1,4 @@
-import { estimateTokens, type Message } from "./compact.js";
+import type { Message } from "./compact.js";
 import { prependSystemPrompt } from "./system-prompt.js";
 import { projectTrajectory } from "./trajectory.js";
 
@@ -67,5 +67,8 @@ export function estimateRequestTokens(
   messages: Message[],
   tools: unknown[],
 ): number {
-  return estimateTokens(messages) + Math.ceil(JSON.stringify(tools).length / 4);
+  return messages.reduce(
+    (total, message) => total + Math.ceil(JSON.stringify(message).length / 4),
+    Math.ceil(JSON.stringify(tools).length / 4),
+  );
 }

@@ -10,6 +10,7 @@ import {
 import {
   ContextOverflowError,
   buildContextProjection,
+  estimateRequestTokens,
 } from "../src/context-projection.js";
 
 function actionHistory(groups: number, outputSize = 200): Message[] {
@@ -123,6 +124,28 @@ test("context projection lowers effective raw actions until the request fits", (
   assert.ok(result.estimatedTokens <= 1_800);
   assert.ok(result.compressionTokens > 0);
   assert.equal(countRawToolActions(result.apiMessages), result.effectiveRawActions);
+});
+
+test("uses the dashboard's exact request-token estimate", () => {
+  const messages: Message[] = [
+    { role: "user", content: "hello" },
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{
+        id: "call_1",
+        type: "function",
+        function: { name: "shell", arguments: '{"command":"pwd"}' },
+      }],
+    },
+  ];
+  const tools = [{ type: "function", function: { name: "shell" } }];
+  const dashboardEstimate = messages.reduce(
+    (total, message) => total + Math.ceil(JSON.stringify(message).length / 4),
+    Math.ceil(JSON.stringify(tools).length / 4),
+  );
+
+  assert.equal(estimateRequestTokens(messages, tools), dashboardEstimate);
 });
 
 test("throws before the provider call when zero raw actions still cannot fit", () => {

@@ -13,7 +13,7 @@ import {
   saveConfig as persistConfig,
   type AgentConfig,
 } from "../config.js";
-import { estimateTokens, type Message, type UsageInfo } from "../compact.js";
+import type { Message, UsageInfo } from "../compact.js";
 import { run, type RunOptions } from "../loop.js";
 import {
   createProviderClient,
@@ -53,6 +53,7 @@ export class InlineAgentApp {
   private readonly queue: string[] = [];
   private client?: OpenAI;
   private contextWindow = 0;
+  private projectedContextTokens = 0;
   private processing: Promise<void> | null = null;
   private settingsView?: SettingsView;
   private settingsOverlay?: OverlayHandle;
@@ -121,6 +122,7 @@ export class InlineAgentApp {
       this.queue.length = 0;
       this.skillsInjected = false;
       this.lastUsage = undefined;
+      this.projectedContextTokens = 0;
       this.chatView?.clearTranscript();
       this.chatView?.setStatus("ready", 0, 0);
       return;
@@ -136,7 +138,11 @@ export class InlineAgentApp {
 
     this.chatView.addUser(trimmed);
     this.queue.push(trimmed);
-    this.chatView.setStatus("running", this.queue.length, estimateTokens(this.messages));
+    this.chatView.setStatus(
+      "running",
+      this.queue.length,
+      this.projectedContextTokens,
+    );
     if (!this.processing) {
       this.processing = this.processQueue().finally(() => {
         this.processing = null;
@@ -149,7 +155,7 @@ export class InlineAgentApp {
     if (!this.currentAbort || this.currentAbort.signal.aborted) return false;
     this.cancelledQueueCount = this.queue.length;
     this.queue.length = 0;
-    this.chatView?.setStatus("interrupting", 0, estimateTokens(this.messages));
+    this.chatView?.setStatus("interrupting", 0, this.projectedContextTokens);
     this.currentAbort.abort();
     this.tui.requestRender();
     return true;
@@ -166,7 +172,7 @@ export class InlineAgentApp {
       this.chatView.setStatus(
         this.processing ? "running" : "ready",
         this.queue.length,
-        estimateTokens(this.messages),
+        this.projectedContextTokens,
       );
     } else {
       this.activateChat(config, client);
@@ -256,7 +262,11 @@ export class InlineAgentApp {
       const config = this.config;
       const client = this.client;
       if (!config || !client || !this.chatView) return;
-      this.chatView.setStatus("running", this.queue.length, estimateTokens(this.messages));
+      this.chatView.setStatus(
+        "running",
+        this.queue.length,
+        this.projectedContextTokens,
+      );
       let terminalEventSeen = false;
       const abortController = new AbortController();
       this.currentAbort = abortController;
@@ -299,7 +309,7 @@ export class InlineAgentApp {
     }
 
     if (this.chatView && !this.stopped) {
-      this.chatView.setStatus("ready", 0, estimateTokens(this.messages));
+      this.chatView.setStatus("ready", 0, this.projectedContextTokens);
       this.tui.setFocus(this.chatView.editor);
       this.tui.requestRender();
     }
@@ -310,6 +320,10 @@ export class InlineAgentApp {
     if (!chat) return;
     switch (event.type) {
       case "run-start":
+        return;
+      case "context-projection":
+        this.projectedContextTokens = event.estimatedTokens;
+        chat.setStatus("running", this.queue.length, this.projectedContextTokens);
         return;
       case "tool-start":
         chat.addToolStart(event.id, event.name, event.command);

@@ -1,5 +1,11 @@
 export type AgentEvent =
   | { type: "run-start"; input: string }
+  | {
+      type: "context-projection";
+      estimatedTokens: number;
+      configuredRawActions: number;
+      effectiveRawActions: number;
+    }
   | { type: "tool-start"; id: string; name: string; command: string }
   | {
       type: "tool-complete";
