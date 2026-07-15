@@ -44,6 +44,7 @@ test('root dev command launches the combined CLI and web stack without recursion
 
   assert.equal(rootPackage.scripts.dev, 'node web/scripts/dev-stack.mjs');
   assert.equal(rootPackage.scripts['dev:agent'], 'tsx src/index.ts');
+  assert.deepEqual(commands.build.args, ['run', 'build']);
   assert.deepEqual(commands.backend.args, ['run', 'dev:agent']);
   assert.deepEqual(commands.web.args, ['run', 'dev:astro']);
 });
@@ -54,6 +55,9 @@ test('starts the backend and waits for SSE before starting Astro', async () => {
   const web = child('web');
 
   const result = await runDevStack({
+    buildWeb: async () => {
+      calls.push('build-web');
+    },
     isBackendReady: async () => {
       calls.push('check-backend');
       return false;
@@ -73,6 +77,7 @@ test('starts the backend and waits for SSE before starting Astro', async () => {
   });
 
   assert.deepEqual(calls, [
+    'build-web',
     'check-backend',
     'start-backend',
     'wait-backend',
@@ -87,6 +92,9 @@ test('reuses an already running backend', async () => {
   const web = child('web');
 
   const result = await runDevStack({
+    buildWeb: async () => {
+      calls.push('build-web');
+    },
     isBackendReady: async () => true,
     startBackend: () => {
       calls.push('start-backend');
@@ -102,7 +110,7 @@ test('reuses an already running backend', async () => {
     installSignalHandlers: false,
   });
 
-  assert.deepEqual(calls, ['start-web']);
+  assert.deepEqual(calls, ['build-web', 'start-web']);
   assert.equal(result.backend, undefined);
   assert.equal(result.web, web);
 });

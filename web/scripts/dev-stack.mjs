@@ -48,6 +48,11 @@ export async function waitForPort({
 
 export function getDevCommands() {
   return {
+    build: {
+      command: npmCommand,
+      args: ['run', 'build'],
+      cwd: webDir,
+    },
     backend: {
       command: npmCommand,
       args: ['run', 'dev:agent'],
@@ -59,6 +64,23 @@ export function getDevCommands() {
       cwd: webDir,
     },
   };
+}
+
+function buildWebAssets() {
+  const { build } = getDevCommands();
+  const child = spawn(build.command, build.args, {
+    cwd: build.cwd,
+    env: process.env,
+    stdio: ['ignore', 'inherit', 'inherit'],
+  });
+
+  return new Promise((resolveBuild, rejectBuild) => {
+    child.once('error', rejectBuild);
+    child.once('exit', (code) => {
+      if (code === 0) resolveBuild();
+      else rejectBuild(new Error(`Astro build exited with code ${code ?? 'signal'}`));
+    });
+  });
 }
 
 function spawnBackend() {
@@ -110,6 +132,7 @@ function attachLifecycle(backend, web) {
 }
 
 export async function runDevStack({
+  buildWeb = buildWebAssets,
   isBackendReady = isPortOpen,
   startBackend = spawnBackend,
   waitForBackend = (child) => waitForPort({ child }),
@@ -117,6 +140,9 @@ export async function runDevStack({
   installSignalHandlers = true,
 } = {}) {
   let backend;
+
+  process.stderr.write(`Building dashboard for http://localhost:${backendPort}...\n`);
+  await buildWeb();
 
   if (await isBackendReady()) {
     process.stderr.write(`Using inline-agent backend already running on port ${backendPort}.\n`);
