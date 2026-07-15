@@ -110,6 +110,14 @@ npm run dev
 
 ## Retained-mode TUI와 provider 설정
 
+CLI의 짧은 공식 명령은 `inla`이며 기존 `inline-agent`도 동일하게 동작한다.
+
+```bash
+inla
+# 또는
+inline-agent
+```
+
 TTY에서는 터미널 스크롤백을 보존하는 inline retained-mode UI가 실행된다. 최초 실행 시 설정 화면에서 Z.AI Coding Plan, OpenAI 또는 Custom OpenAI-compatible provider를 선택하고 API Key를 입력한다. 인증 후 `/models`에서 가져온 모델을 검색해 선택하거나 모델 ID를 직접 입력할 수 있다.
 
 설정은 `~/.inlineagent/config.json`에 저장된다. 디렉터리 권한은 `0700`, 설정 파일은 `0600`이며 API Key는 TUI에서 마스킹된다. 실행 중 `/settings`를 열어 provider, 모델, reasoning 값을 변경해도 기존 대화는 유지되고 다음 API 호출부터 새 설정이 적용된다.

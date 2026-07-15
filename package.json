@@ -5,7 +5,8 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "inline-agent": "dist/index.js"
+    "inline-agent": "dist/index.js",
+    "inla": "dist/index.js"
   },
   "scripts": {
     "dev": "node web/scripts/dev-stack.mjs",
