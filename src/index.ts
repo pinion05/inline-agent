@@ -2,7 +2,8 @@
 /**
  * Inline Agent — entry point.
  *
- * One tool. Zero system prompt. Maximum context.
+ * Zero system prompt. One shell tool. Invisible context sanitization.
+ * Rule-based trajectory compression.
  */
 import OpenAI from "openai";
 import * as readline from "node:readline";
@@ -14,7 +15,6 @@ async function main() {
   const baseURL = process.env.INLINE_BASE_URL;
   const apiKey = process.env.OPENAI_API_KEY ?? "";
 
-  // Guess context window from model name.
   const contextWindow = guessContextWindow(model);
 
   const client = baseURL
@@ -34,15 +34,29 @@ async function main() {
     prompt: ">>> ",
   });
 
-  process.stderr.write(`inline-agent | model=${model} | ctx=${contextWindow}\n\n`);
+  process.stderr.write(
+    `inline-agent | model=${model} | ctx=${contextWindow}\n\n`
+  );
   rl.prompt();
 
-  const opts = { client, model, contextWindow, messages, skillsInjected: false };
+  const opts = {
+    client,
+    model,
+    contextWindow,
+    messages,
+    skillsInjected: false,
+  };
 
   rl.on("line", async (input: string) => {
     const trimmed = input.trim();
-    if (!trimmed) { rl.prompt(); return; }
-    if (["/exit", "/quit"].includes(trimmed)) { rl.close(); return; }
+    if (!trimmed) {
+      rl.prompt();
+      return;
+    }
+    if (["/exit", "/quit"].includes(trimmed)) {
+      rl.close();
+      return;
+    }
 
     try {
       const reply = await run(opts, trimmed);

@@ -4,18 +4,20 @@
  * System prompt: 0 lines.
  * Tool: shell (one).
  * Sanitization: invisible.
- * Compaction: invisible.
+ * Trajectory compression: invisible.
  */
 import type OpenAI from "openai";
-import { runShell, summarizeOutput } from "./shell.js";
-import { needsCompaction, compact, type Message } from "./compact.js";
+import { runShell } from "./shell.js";
+import { needsCompression, type Message, type UsageInfo } from "./compact.js";
+import { compressTrajectory } from "./trajectory.js";
 import { skillsAnnouncement } from "./skills.js";
 
 const SHELL_TOOL = {
   type: "function" as const,
   function: {
     name: "shell",
-    description: "Execute a shell command. Returns stdout, stderr, and exit code.",
+    description:
+      "Execute a shell command. Returns stdout and stderr. Output is truncated to the last 500 non-whitespace chars; if truncated, a temp file path is provided for full access via tail/grep/head.",
     parameters: {
       type: "object",
       properties: {
@@ -25,7 +27,8 @@ const SHELL_TOOL = {
         },
         max_length: {
           type: "integer",
-          description: "Override output truncation. 0 = no limit. Default: 500 chars.",
+          description:
+            "Override output truncation limit (non-ws chars). 0 = no truncation. Default: 500.",
         },
       },
       required: ["command"],
@@ -33,21 +36,21 @@ const SHELL_TOOL = {
   },
 };
 
+const MAX_ITERATIONS = 50;
+
 interface RunOptions {
   client: OpenAI;
   model: string;
   contextWindow: number;
   messages: Message[];
   skillsInjected?: boolean;
+  lastUsage?: UsageInfo;
 }
 
-export async function run(
-  opts: RunOptions,
-  userInput: string
-): Promise<string> {
+export async function run(opts: RunOptions, userInput: string): Promise<string> {
   const { client, model, contextWindow, messages } = opts;
 
-  // First message: inject skills list into the user input (not system prompt).
+  // First message: inject skills list into user input (not system prompt).
   let effectiveInput = userInput;
   if (!opts.skillsInjected) {
     const skills = skillsAnnouncement();
@@ -59,15 +62,8 @@ export async function run(
 
   messages.push({ role: "user", content: effectiveInput });
 
-  // Check compaction before adding more context.
-  if (needsCompaction(messages, contextWindow)) {
-    process.stderr.write("[compacting...]\n");
-    const compacted = await compact(client, model, messages);
-    messages.length = 0;
-    messages.push(...compacted);
-  }
-
-  const MAX_ITERATIONS = 50;
+  // Apply trajectory compression before starting.
+  maybeCompress(opts);
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await client.chat.completions.create({
@@ -77,6 +73,15 @@ export async function run(
     });
 
     const msg = response.choices[0].message;
+
+    // Track actual API usage for accurate token counting.
+    if (response.usage) {
+      opts.lastUsage = {
+        index: messages.length - 1,
+        promptTokens: response.usage.prompt_tokens,
+        completionTokens: response.usage.completion_tokens,
+      };
+    }
 
     // Serialize assistant message.
     const entry: Message = {
@@ -97,21 +102,6 @@ export async function run(
 
     // No tool calls → agent is done.
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
-      // Check for "Y" summary request (from previous truncated output).
-      const content = (msg.content ?? "").trim().toUpperCase();
-      if (content === "Y" && i > 0) {
-        const lastToolResult = findLastRawOutput(messages);
-        if (lastToolResult) {
-          process.stderr.write("[summarizing...]\n");
-          const summary = await summarizeOutput(client, model, lastToolResult);
-          messages.push({
-            role: "tool",
-            tool_call_id: "summary",
-            content: `[summary]\n${summary}`,
-          });
-          continue; // let the LLM process the summary
-        }
-      }
       return msg.content ?? "";
     }
 
@@ -131,30 +121,24 @@ export async function run(
       });
     }
 
-    // Check compaction mid-loop too.
-    if (needsCompaction(messages, contextWindow)) {
-      process.stderr.write("[compacting...]\n");
-      const compacted = await compact(client, model, messages);
-      messages.length = 0;
-      messages.push(...compacted);
-    }
+    // Apply trajectory compression after each tool round.
+    maybeCompress(opts);
   }
 
   return "[max iterations reached]";
 }
 
-/** Find the last tool result that was truncated, to summarize it. */
-function findLastRawOutput(messages: Message[]): string | null {
-  // Walk backward to find the last truncated tool result.
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role === "tool" && m.content.includes("[truncated.")) {
-      // The raw output was the full output before truncation.
-      // We stored the truncated version — we need to re-run the command
-      // or store the raw output separately.
-      // For now, return the truncated content as context.
-      return m.content;
-    }
+function maybeCompress(opts: RunOptions): void {
+  const { messages, contextWindow, lastUsage } = opts;
+  if (needsCompression(messages, contextWindow, lastUsage)) {
+    process.stderr.write("[compressing trajectory...]\n");
+    const before = messages.length;
+    const compressed = compressTrajectory(messages);
+    messages.length = 0;
+    messages.push(...compressed);
+    opts.lastUsage = undefined; // invalidate after modification
+    process.stderr.write(
+      `[trajectory compressed: ${before} → ${messages.length} messages]\n`
+    );
   }
-  return null;
 }

@@ -1,18 +1,8 @@
 /**
- * Compaction — invisible context protection.
+ * Token estimation + compaction trigger.
  *
- * Trigger: 50% of context window used.
- * Keeps: last 10 turns (original).
- * Compacts: everything before that via sanitization LLM.
- * Marks: [compacted history] so LLM knows.
+ * Uses API usage when available, falls back to chars/4.
  */
-
-const COMPACTION_PROMPT = `Summarize this conversation for continuation. Preserve:
-- What was accomplished
-- Current work in progress
-- Key files and their state
-- Next steps
-- User requests and constraints`;
 
 export interface Message {
   role: "system" | "user" | "assistant" | "tool";
@@ -20,6 +10,14 @@ export interface Message {
   tool_call_id?: string;
   tool_calls?: any[];
 }
+
+export interface UsageInfo {
+  index: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
+const COMPACTION_BUFFER = 16_000;
 
 /** Rough token estimate: ~4 chars per token. */
 export function estimateTokens(messages: Message[]): number {
@@ -35,68 +33,33 @@ export function estimateTokens(messages: Message[]): number {
   return Math.ceil(chars / 4);
 }
 
-/** Find the index where the last N turns start. */
-function findTurnBoundary(messages: Message[], keepTurns: number): number {
-  // Count user messages from the end — each is a turn start.
-  let userCount = 0;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") {
-      userCount++;
-      if (userCount > keepTurns) return i;
-    }
-  }
-  return -1; // not enough turns to compact
-}
-
-export function needsCompaction(
+/**
+ * Check if we need trajectory compression.
+ * Uses context window - output reservation - buffer.
+ */
+export function needsCompression(
   messages: Message[],
   contextWindow: number,
-  threshold = 0.5
+  lastUsage?: UsageInfo,
+  maxOutput: number = 16_384,
 ): boolean {
-  return estimateTokens(messages) > contextWindow * threshold;
+  let tokens: number;
+
+  if (lastUsage) {
+    // Use actual API usage + estimate for messages after.
+    tokens = lastUsage.promptTokens + lastUsage.completionTokens;
+    for (let i = lastUsage.index + 1; i < messages.length; i++) {
+      tokens += estimateMessageTokens(messages[i]);
+    }
+  } else {
+    tokens = estimateTokens(messages);
+  }
+
+  const usable = Math.max(0, contextWindow - Math.max(COMPACTION_BUFFER, maxOutput));
+  return tokens >= usable;
 }
 
-export async function compact(
-  client: any,
-  model: string,
-  messages: Message[],
-  keepTurns = 10
-): Promise<Message[]> {
-  const boundary = findTurnBoundary(messages, keepTurns);
-  if (boundary <= 0) return messages; // nothing to compact
-
-  // Separate old messages (to compact) from recent (to keep).
-  const toCompact = messages.slice(0, boundary);
-  const toKeep = messages.slice(boundary);
-
-  // Serialize old messages to text.
-  const transcript = toCompact
-    .map((m) => {
-      let line = `[${m.role}]`;
-      if (m.content) line += ` ${m.content}`;
-      if (m.tool_calls) line += ` ${JSON.stringify(m.tool_calls)}`;
-      return line;
-    })
-    .join("\n\n");
-
-  // Call sanitization LLM — plain text, no tools.
-  const resp = await client.chat.completions.create({
-    model,
-    messages: [
-      { role: "user", content: `${COMPACTION_PROMPT}\n\n${transcript}` },
-    ],
-  });
-
-  const summary = resp.choices[0].message.content ?? "[compaction failed]";
-
-  // Rebuild: compacted summary as a user message, then recent turns.
-  const compacted: Message[] = [
-    {
-      role: "user",
-      content: `[compacted history]\n${summary}`,
-    },
-    ...toKeep,
-  ];
-
-  return compacted;
+function estimateMessageTokens(msg: Message): number {
+  const text = JSON.stringify(msg);
+  return Math.ceil(text.length / 4);
 }

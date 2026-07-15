@@ -1,43 +1,83 @@
 /**
  * Shell execution + information sanitization layer.
  *
- * The LLM never sees raw output. Everything passes through here:
- *   - 500 non-ws char cut (default)
- *   - "Y for summary?" prompt on truncation
- *   - max_length override
+ * The LLM never sees raw output directly. Everything passes through:
+ *   - ANSI/binary sanitization
+ *   - Output truncation with temp file fallback
  *   - 300s timeout
+ *
+ * No "Y for summary" — temp file path is provided for LLM to
+ * self-serve via tail/grep/head.
  */
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 
 const execAsync = promisify(exec);
 
 const DEFAULT_MAX_CHARS = 500;
 const DEFAULT_TIMEOUT = 300_000; // 300s
+const TMP_DIR = join(
+  process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"),
+  "inline-agent",
+  "tmp"
+);
 
 export interface ShellResult {
   output: string;
   truncated: boolean;
-  totalNonWsChars: number;
+  exitCode: number;
 }
 
-/** Count non-whitespace characters. */
-function countNonWs(s: string): number {
-  return s.replace(/\s/g, "").length;
+/** Strip ANSI escape codes, control chars, normalize line endings. */
+function sanitize(text: string): string {
+  // ANSI escape sequences (CSI, OSC, etc.)
+  text = text.replace(
+    /[\u001B\u009B][[\]()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
+    ""
+  );
+  text = text.replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, "");
+  text = text.replace(/\u001B[@-_]/g, "");
+
+  // Carriage returns
+  text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  // Other control characters (except newline/tab)
+  text = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+
+  return text;
 }
 
-/** Cut to N non-whitespace chars from the front. */
-function truncate(output: string, maxNonWs: number): { text: string; total: number } {
-  const total = countNonWs(output);
+/** Save full output to temp file, return path. */
+function saveToTempFile(text: string): string {
+  try {
+    mkdirSync(TMP_DIR, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const rand = Math.random().toString(36).slice(2, 8);
+    const filename = `${ts}-${rand}.log`;
+    const filepath = join(TMP_DIR, filename);
+    writeFileSync(filepath, text, "utf-8");
+    return filepath;
+  } catch {
+    return "";
+  }
+}
+
+/** Cut to N non-whitespace chars from the tail (keep errors at end). */
+function truncateTail(output: string, maxNonWs: number): { text: string; total: number } {
+  const total = output.replace(/\s/g, "").length;
   if (total <= maxNonWs) return { text: output, total };
 
-  // Walk forward until we've collected maxNonWs non-ws chars.
+  // Walk backward from end until we've collected maxNonWs non-ws chars.
   let count = 0;
-  let i = 0;
-  for (; i < output.length && count < maxNonWs; i++) {
-    if (!/\s/.test(output[i])) count++;
+  let i = output.length;
+  for (; i > 0 && count < maxNonWs; i--) {
+    if (!/\s/.test(output[i - 1])) count++;
   }
-  return { text: output.slice(0, i), total };
+  return { text: output.slice(i), total };
 }
 
 export async function runShell(
@@ -68,45 +108,36 @@ export async function runShell(
     }
   }
 
+  // Combine stdout + stderr
   let raw = stdout;
   if (stderr) raw += (raw ? "\n[stderr]\n" : "") + stderr;
   raw += `\n[exit: ${exitCode}]`;
 
+  // Sanitize: ANSI, control chars, binary garbage
+  raw = sanitize(raw) || "[no output]";
+
+  // No truncation
   if (noLimit) {
-    return { output: raw || "[no output]", truncated: false, totalNonWsChars: countNonWs(raw) };
+    return { output: raw, truncated: false, exitCode };
   }
 
   const maxChars = options?.maxLength ?? DEFAULT_MAX_CHARS;
-  const { text, total } = truncate(raw, maxChars);
+  const { text, total } = truncateTail(raw, maxChars);
 
   if (total <= maxChars) {
-    return { output: raw || "[no output]", truncated: false, totalNonWsChars: total };
+    return { output: raw, truncated: false, exitCode };
   }
 
-  const truncated =
-    text +
-    `\n[truncated. total: ${total} chars. Send Y for summary.]`;
+  // Save full output to temp file for LLM self-service.
+  const tmpPath = saveToTempFile(raw);
 
-  return { output: truncated, truncated: true, totalNonWsChars: total };
-}
+  const hint = tmpPath
+    ? `\n[truncated. total: ${total} chars. Full output: ${tmpPath}\nUse tail, grep, or head to read specific parts.]`
+    : `\n[truncated. total: ${total} chars.]`;
 
-/**
- * Summarize a large shell output using the sanitization LLM.
- * Plain text call — no tools, no system prompt.
- */
-export async function summarizeOutput(
-  client: any,
-  model: string,
-  rawOutput: string
-): Promise<string> {
-  const resp = await client.chat.completions.create({
-    model,
-    messages: [
-      {
-        role: "user",
-        content: `Compress this command output, preserving key information:\n\n${rawOutput}`,
-      },
-    ],
-  });
-  return resp.choices[0].message.content ?? "[summary failed]";
+  return {
+    output: `...${total - text.replace(/\s/g, "").length} chars truncated...\n${hint}\n\n${text}`,
+    truncated: true,
+    exitCode,
+  };
 }
