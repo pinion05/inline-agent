@@ -14,6 +14,12 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { run } from "./loop.js";
 import { startServer } from "./server.js";
+import {
+  formatAgentReply,
+  formatUserPrompt,
+  resetStyle,
+  supportsColor,
+} from "./tui.js";
 import type { Message } from "./compact.js";
 
 const CONFIG_DIR = join(homedir(), ".inline-agent");
@@ -169,10 +175,12 @@ function startAgent(baseURL: string | undefined, apiKey: string, model: string) 
   startServer();
 
   const messages: Message[] = [];
+  const promptColors = supportsColor(process.stderr);
+  const replyColors = supportsColor(process.stdout);
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stderr,
-    prompt: ">>> ",
+    prompt: formatUserPrompt(promptColors),
   });
 
   const provider = baseURL?.includes("z.ai")
@@ -194,6 +202,7 @@ function startAgent(baseURL: string | undefined, apiKey: string, model: string) 
   };
 
   rl.on("line", async (input: string) => {
+    process.stderr.write(resetStyle(promptColors));
     const trimmed = input.trim();
     if (!trimmed) {
       rl.prompt();
@@ -205,7 +214,7 @@ function startAgent(baseURL: string | undefined, apiKey: string, model: string) 
     }
     try {
       const reply = await run(opts, trimmed);
-      process.stdout.write(reply + "\n\n");
+      process.stdout.write(formatAgentReply(reply, replyColors) + "\n\n");
     } catch (e: any) {
       process.stderr.write(`[error] ${e.message}\n\n`);
     }
@@ -213,7 +222,7 @@ function startAgent(baseURL: string | undefined, apiKey: string, model: string) 
   });
 
   rl.on("close", () => {
-    process.stderr.write("\n");
+    process.stderr.write(resetStyle(promptColors) + "\n");
     process.exit(0);
   });
 }

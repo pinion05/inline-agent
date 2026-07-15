@@ -11,6 +11,7 @@ import { runShell } from "./shell.js";
 import { needsCompression, type Message, type UsageInfo } from "./compact.js";
 import { compressTrajectory } from "./trajectory.js";
 import { skillsAnnouncement } from "./skills.js";
+import { formatToolLine, supportsColor } from "./tui.js";
 import {
   estimateTokens,
   recordApiContext,
@@ -129,7 +130,9 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
       const command: string = args.command;
       const maxLength: number | undefined = args.max_length;
 
-      process.stderr.write(`  $ ${command}\n`);
+      process.stderr.write(
+        formatToolLine(command, supportsColor(process.stderr)) + "\n"
+      );
       updateContext(messages, contextWindow, `$ ${command}`);
 
       const result = await runShell(command, { maxLength });
