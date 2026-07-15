@@ -13,6 +13,13 @@ test("publishes inline-agent and inla as equivalent CLI commands", async () => {
     "inline-agent": "dist/index.js",
     inla: "dist/index.js",
   });
+  assert.deepEqual(packageJson.files, ["dist"]);
+  assert.equal(packageJson.scripts.prepack, "npm run build");
+  assert.deepEqual(packageJson.engines, { node: ">=22.19.0" });
+  assert.deepEqual(packageJson.repository, {
+    type: "git",
+    url: "git+https://github.com/pinion05/inline-agent.git",
+  });
 });
 
 test("CLI entry source keeps the executable shebang", async () => {

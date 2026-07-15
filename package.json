@@ -4,16 +4,38 @@
   "description": "정크 컨텍스트 제거 — LLM 에이전트를 위한 보이지 않는 정보 정돈 레이어",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pinion05/inline-agent.git"
+  },
+  "homepage": "https://github.com/pinion05/inline-agent#readme",
+  "bugs": {
+    "url": "https://github.com/pinion05/inline-agent/issues"
+  },
+  "keywords": [
+    "ai-agent",
+    "coding-agent",
+    "llm",
+    "tui",
+    "context-compression"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "bin": {
     "inline-agent": "dist/index.js",
     "inla": "dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "node web/scripts/dev-stack.mjs",
     "dev:agent": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "tsx test-trajectory.ts && tsx --test test/*.test.ts"
+    "test": "tsx test-trajectory.ts && tsx --test test/*.test.ts",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@earendil-works/pi-tui": "^0.80.7",
