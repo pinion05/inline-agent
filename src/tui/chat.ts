@@ -9,7 +9,7 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 
-import type { AgentConfig } from "../config.js";
+import { formatCharacterLimit, type AgentConfig } from "../config.js";
 import { providerDefinition } from "../provider.js";
 import { tuiTheme } from "./theme.js";
 
@@ -101,7 +101,7 @@ export class ChatView implements Component {
   completeTool(id: string, output: string, exitCode: number): void {
     const tool = this.tools.get(id);
     if (!tool) return;
-    tool.complete(output, exitCode);
+    tool.complete(toolOutputPreview(output), exitCode);
     this.tui.requestRender();
   }
 
@@ -166,7 +166,9 @@ export class ChatView implements Component {
         : tuiTheme.success;
     this.footer.setText(
       statusColor(`● ${this.status}`)
-      + tuiTheme.muted(` │ ctx ${usage} │ queue ${this.queueLength} │ /settings`),
+      + tuiTheme.muted(
+        ` │ ctx ${usage} │ raw ${this.config.recentRawToolActions} │ limit ${formatCharacterLimit(this.config.toolOutputSafetyLimit)} │ queue ${this.queueLength} │ /settings`,
+      ),
     );
     this.tui.requestRender();
   }
@@ -211,6 +213,13 @@ class MessageBlock implements Component {
 
   render(width: number): string[] { return this.box.render(width); }
   invalidate(): void { this.box.invalidate(); }
+}
+
+const TOOL_PREVIEW_CHARS = 4_096;
+
+function toolOutputPreview(output: string): string {
+  if (output.length <= TOOL_PREVIEW_CHARS) return output;
+  return `[tool preview: last ${TOOL_PREVIEW_CHARS.toLocaleString("en-US")} chars of ${output.length.toLocaleString("en-US")}]\n${output.slice(-TOOL_PREVIEW_CHARS)}`;
 }
 
 class ToolBlock implements Component {

@@ -264,6 +264,8 @@ export class InlineAgentApp {
         client,
         model: config.model,
         reasoningEffort: config.reasoningEffort,
+        recentRawToolActions: config.recentRawToolActions,
+        toolOutputSafetyLimit: config.toolOutputSafetyLimit,
         contextWindow: this.contextWindow,
         messages: this.messages,
         skillsInjected: this.skillsInjected,

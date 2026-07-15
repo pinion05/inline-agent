@@ -108,7 +108,7 @@ AgentDiet가 LLM에게 `erase` 도구를 줬다.
 npm run dev
 ```
 
-브라우저에서 [http://localhost:7878/](http://localhost:7878/)을 열면 마지막 LLM API 호출 직전의 시스템 프롬프트, tool 정의, 컨텍스트 원문 전체, 활성 model과 `reasoning_effort`, 현재 토큰 사용량, 소거한 불필요 토큰, 캐시 히트 비율을 실시간으로 확인할 수 있다.
+브라우저에서 [http://localhost:7878/](http://localhost:7878/)을 열면 마지막 LLM API 호출 직전의 시스템 프롬프트, tool 정의, 컨텍스트 원문 전체, 활성 model과 `reasoning_effort`, 현재 토큰 사용량, 안전 상한으로 잘린 토큰, 현재 요청 projection으로 압축한 토큰, 설정/실제 raw action 수, 캐시 히트 비율을 실시간으로 확인할 수 있다.
 
 ## Retained-mode TUI와 provider 설정
 
@@ -122,7 +122,9 @@ inline-agent
 
 TTY에서는 터미널 스크롤백을 보존하는 inline retained-mode UI가 실행된다. 최초 실행 시 설정 화면에서 Z.AI Coding Plan, OpenAI 또는 Custom OpenAI-compatible provider를 선택하고 API Key를 입력한다. 인증 후 `/models`에서 가져온 모델을 검색해 선택하거나 모델 ID를 직접 입력할 수 있다.
 
-설정은 `~/.inlineagent/config.json`에 저장된다. 디렉터리 권한은 `0700`, 설정 파일은 `0600`이며 API Key는 TUI에서 마스킹된다. 실행 중 `/settings`를 열어 provider, 모델, reasoning 값을 변경해도 기존 대화는 유지되고 다음 API 호출부터 새 설정이 적용된다.
+설정은 `~/.inlineagent/config.json`에 저장된다. 디렉터리 권한은 `0700`, 설정 파일은 `0600`이며 API Key는 TUI에서 마스킹된다. 실행 중 `/settings`를 열어 provider, 모델, reasoning, 최근 raw tool action 수, 단일 출력 안전 상한을 변경해도 기존 대화는 유지되고 다음 API 호출부터 새 설정이 적용된다.
+
+기본값은 최근 tool action `3`개 원문 보존과 단일 출력 `64K` 문자 상한이다. action 수는 `1–20`, 상한은 `4K–1M` 범위에서 preset 또는 직접 입력으로 설정한다. 최근 최대 20개 action만 raw recovery ring에 유지하고 더 오래된 action은 영구 압축하므로 메모리가 무제한 증가하지 않는다. 상한을 넘은 전체 출력은 `~/.inlineagent/log/`에 저장된다.
 
 reasoning은 Auto 없이 provider 원본 값을 명시적으로 전송한다.
 
@@ -222,6 +224,14 @@ $EDITOR ~/.inlineagent/system.md
 ```
 
 `~/.inlineagent/system.md`는 매 LLM API 호출 직전에 다시 읽으므로 에이전트를 재시작하지 않아도 다음 호출부터 변경 내용이 반영된다. 비어 있거나 존재하지 않으면 시스템 메시지를 보내지 않는다. 전송된 UTF-8 원문은 [http://localhost:7878/](http://localhost:7878/)의 **실제 SYSTEM PROMPT**와 **실제 LLM 컨텍스트**에서 그대로 확인할 수 있다.
+
+### 시스템 프롬프트를 비워두는 이유
+
+이미 대중적으로 유명한 워크플로우 프로젝트가 많다 — Superpowers, g-stack, Skills 등. 이런 것들을 에이전트에게 적용하려고 시스템 프롬프트에 워크플로 규칙을 적는 것은 **중복이자 모순**을 낳는다.
+
+LLM은 이미 이 워크플로우들을 학습하고 있다. "이슈부터 등록하라", "계획서를 먼저 작성하라" 같은 지시는 LLM이 아는 절차를 굳이 다시 말해주는 셈이다. 더 나쁜 건, 프레임워크가 강제하는 절차와 시스템 프롬프트의 규칙이 **서로 충돌**할 수 있다는 것이다.
+
+시스템 프롬프트는 비워두는 것이 기본값이다. 필요한 것만, 최소한으로 넣어라. LLM이 이미 아는 것을 반복하지 마라.
 
 ## References
 

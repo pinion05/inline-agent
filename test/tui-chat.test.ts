@@ -38,6 +38,8 @@ const config: AgentConfig = {
   apiKey: "never-render-this-key",
   model: "glm-5.2",
   reasoningEffort: "high",
+  recentRawToolActions: 3,
+  toolOutputSafetyLimit: 65_536,
 };
 
 test("renders width-safe retained user, tool, assistant, and error blocks", () => {
@@ -60,11 +62,27 @@ test("renders width-safe retained user, tool, assistant, and error blocks", () =
   assert.match(plain, /ERROR/);
   assert.match(plain, /glm-5\.2/);
   assert.match(plain, /reasoning high/);
+  assert.match(plain, /raw 3/);
+  assert.match(plain, /limit 64K/);
   assert.equal(wide.includes(config.apiKey), false);
 
   for (const line of view.render(24)) {
     assert.ok(visibleWidth(line) <= 24, `${visibleWidth(line)} > 24: ${line}`);
   }
+});
+
+test("retains at most a 4K tail preview in tool cards", () => {
+  const terminal = new FakeTerminal();
+  const view = new ChatView(new TUI(terminal), config, 1_000_000);
+  const output = `${"a".repeat(6_000)}${"z".repeat(4_000)}`;
+
+  view.addToolStart("call_preview", "shell", "large-output");
+  view.completeTool("call_preview", output, 0);
+
+  const rendered = stripAnsi(view.render(120).join("\n"));
+  assert.match(rendered, /tool preview: last 4,096 chars/);
+  assert.equal(rendered.includes("a".repeat(100)), false);
+  assert.match(rendered, /z{100}/);
 });
 
 test("submits multiline editor input and exposes an IME cursor marker", () => {

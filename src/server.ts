@@ -11,6 +11,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Message } from "./compact.js";
+import { DEFAULT_RECENT_RAW_TOOL_ACTIONS } from "./config.js";
 
 const PORT = parseInt(process.env.INLINE_PORT ?? "7878", 10);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -26,6 +27,10 @@ let currentStats: Stats = {
   messageCount: 0,
   contextWindow: 0,
   eliminatedTokens: 0,
+  safetyTruncatedTokens: 0,
+  currentProjectionTokens: 0,
+  configuredRawActions: DEFAULT_RECENT_RAW_TOOL_ACTIONS,
+  effectiveRawActions: DEFAULT_RECENT_RAW_TOOL_ACTIONS,
   totalPromptTokens: 0,
   cacheHitTokens: 0,
   compressionHistory: [],
@@ -38,6 +43,10 @@ export interface Stats {
   messageCount: number;
   contextWindow: number;
   eliminatedTokens: number;
+  safetyTruncatedTokens: number;
+  currentProjectionTokens: number;
+  configuredRawActions: number;
+  effectiveRawActions: number;
   totalPromptTokens: number;
   cacheHitTokens: number;
   compressionHistory: {
@@ -86,12 +95,22 @@ function broadcast() {
 export function recordApiContext(
   messages: Message[],
   tools: unknown[],
-  metadata: { model: string; reasoningEffort: string },
+  metadata: {
+    model: string;
+    reasoningEffort: string;
+    configuredRawActions: number;
+    effectiveRawActions: number;
+    projectionTokens: number;
+  },
 ) {
   lastApiMessages = structuredClone(messages);
   lastApiTools = structuredClone(tools);
   lastApiModel = metadata.model;
   lastApiReasoningEffort = metadata.reasoningEffort;
+  currentStats.currentProjectionTokens = Math.max(0, metadata.projectionTokens);
+  currentStats.configuredRawActions = metadata.configuredRawActions;
+  currentStats.effectiveRawActions = metadata.effectiveRawActions;
+  updateEliminatedTotal();
   broadcast();
 }
 
@@ -106,6 +125,10 @@ export function updateContext(
     messageCount: messages.length,
     contextWindow,
     eliminatedTokens: currentStats.eliminatedTokens,
+    safetyTruncatedTokens: currentStats.safetyTruncatedTokens,
+    currentProjectionTokens: currentStats.currentProjectionTokens,
+    configuredRawActions: currentStats.configuredRawActions,
+    effectiveRawActions: currentStats.effectiveRawActions,
     totalPromptTokens: currentStats.totalPromptTokens,
     cacheHitTokens: currentStats.cacheHitTokens,
     compressionHistory: currentStats.compressionHistory,
@@ -114,10 +137,14 @@ export function updateContext(
   broadcast();
 }
 
-export function recordEliminatedTokens(eliminatedTokens: number) {
-  currentStats.eliminatedTokens += Math.max(0, eliminatedTokens);
+export function recordSafetyTruncation(eliminatedTokens: number) {
+  currentStats.safetyTruncatedTokens += Math.max(0, eliminatedTokens);
+  updateEliminatedTotal();
   broadcast();
 }
+
+/** @deprecated Use recordSafetyTruncation. */
+export const recordEliminatedTokens = recordSafetyTruncation;
 
 export function recordCompression(
   from: number,
@@ -125,7 +152,6 @@ export function recordCompression(
   eliminatedTokens: number
 ) {
   const eliminated = Math.max(0, eliminatedTokens);
-  currentStats.eliminatedTokens += eliminated;
   currentStats.compressionHistory.push({
     from,
     to,
@@ -133,6 +159,11 @@ export function recordCompression(
     time: new Date().toLocaleTimeString(),
   });
   broadcast();
+}
+
+function updateEliminatedTotal(): void {
+  currentStats.eliminatedTokens = currentStats.safetyTruncatedTokens
+    + currentStats.currentProjectionTokens;
 }
 
 export function recordUsage(promptTokens: number, cacheHitTokens: number) {

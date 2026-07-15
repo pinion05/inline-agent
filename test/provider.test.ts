@@ -15,6 +15,8 @@ const baseConfig: AgentConfig = {
   apiKey: "super-secret-key",
   model: "glm-5.2",
   reasoningEffort: "high",
+  recentRawToolActions: 3,
+  toolOutputSafetyLimit: 65_536,
 };
 
 test("describes provider endpoints, defaults, and exact reasoning values", () => {

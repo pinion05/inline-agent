@@ -38,6 +38,8 @@ const config: AgentConfig = {
   apiKey: "app-secret-key",
   model: "glm-5.2",
   reasoningEffort: "high",
+  recentRawToolActions: 3,
+  toolOutputSafetyLimit: 65_536,
 };
 
 const successfulRun = async (opts: RunOptions, input: string) => {
@@ -84,6 +86,8 @@ test("opens first-run settings and activates chat after secure save", async () =
   await settings.submitApiKey("first-key");
   settings.selectModel("glm-5.2");
   settings.selectReasoning("high");
+  settings.selectRecentRawToolActions(3);
+  settings.selectToolOutputSafetyLimit(65_536);
   await settings.confirm();
 
   assert.equal(settings.state.step, "done");
@@ -93,6 +97,8 @@ test("opens first-run settings and activates chat after secure save", async () =
     apiKey: "first-key",
     model: "glm-5.2",
     reasoningEffort: "high",
+    recentRawToolActions: 3,
+    toolOutputSafetyLimit: 65_536,
   }]);
   assert.equal(app.config?.apiKey, "first-key");
   assert.ok(app.chatView);
@@ -260,12 +266,19 @@ test("handles settings, clear, and exit commands without sending them", async ()
 test("applies new runtime settings without clearing messages", async () => {
   const terminal = new FakeTerminal();
   const saved: AgentConfig[] = [];
+  const runSettings: Array<[number, number]> = [];
   const app = new InlineAgentApp({
     terminal,
     initialConfig: config,
     saveConfig: async (next) => { saved.push(next); },
     createClient: () => ({}) as any,
-    runAgent: successfulRun,
+    runAgent: async (options, input) => {
+      runSettings.push([
+        options.recentRawToolActions,
+        options.toolOutputSafetyLimit,
+      ]);
+      return successfulRun(options, input);
+    },
   });
   app.start();
   await app.submit("keep me");
@@ -275,11 +288,18 @@ test("applies new runtime settings without clearing messages", async () => {
     provider: "openai",
     model: "gpt-5.1",
     reasoningEffort: "xhigh",
+    recentRawToolActions: 5,
+    toolOutputSafetyLimit: 262_144,
   };
 
   await app.applyConfig(replacement);
 
   assert.deepEqual(app.messages, before);
+  await app.submit("new settings");
+  assert.deepEqual(runSettings, [
+    [3, 65_536],
+    [5, 262_144],
+  ]);
   assert.deepEqual(saved, [replacement]);
   assert.equal(app.config?.model, "gpt-5.1");
   assert.match(stripAnsi(app.chatView!.render(80).join("\n")), /gpt-5\.1/);

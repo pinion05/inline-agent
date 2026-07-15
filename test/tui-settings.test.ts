@@ -33,6 +33,8 @@ const existing: AgentConfig = {
   apiKey: "secret-key-1234",
   model: "glm-5.2",
   reasoningEffort: "high",
+  recentRawToolActions: 3,
+  toolOutputSafetyLimit: 65_536,
 };
 
 function controllerWith(
@@ -66,6 +68,10 @@ test("completes provider, auth, model, reasoning, and confirmation steps", async
     "none", "minimal", "low", "medium", "high", "xhigh", "max",
   ]);
   controller.selectReasoning("max");
+  assert.equal(controller.state.step, "raw-actions");
+  controller.selectRecentRawToolActions(5);
+  assert.equal(controller.state.step, "safety-limit");
+  controller.selectToolOutputSafetyLimit(262_144);
   assert.equal(controller.state.step, "confirm");
   await controller.confirm();
 
@@ -75,6 +81,8 @@ test("completes provider, auth, model, reasoning, and confirmation steps", async
     apiKey: "new-key",
     model: "glm-5.2",
     reasoningEffort: "max",
+    recentRawToolActions: 5,
+    toolOutputSafetyLimit: 262_144,
   }]);
   assert.equal(controller.state.step, "done");
 });
@@ -113,11 +121,55 @@ test("blocks on auth errors and allows direct model fallback", async () => {
   ]);
 });
 
-test("defaults every provider draft to explicit high reasoning", () => {
+test("accepts custom retention values and validates their ranges", () => {
+  const controller = controllerWith({ status: "success", models: ["model"] });
+  controller.selectProvider("zai");
+  controller.selectModel("model");
+  controller.selectReasoning("high");
+
+  controller.chooseCustomRecentRawToolActions();
+  assert.equal(controller.state.step, "raw-actions-input");
+  controller.submitRecentRawToolActions("21");
+  assert.equal(controller.state.step, "raw-actions-input");
+  assert.match(controller.state.error ?? "", /1.*20/);
+  controller.submitRecentRawToolActions("20");
+  assert.equal(controller.state.step, "safety-limit");
+
+  controller.chooseCustomToolOutputSafetyLimit();
+  assert.equal(controller.state.step, "safety-limit-input");
+  controller.submitToolOutputSafetyLimit("2K");
+  assert.equal(controller.state.step, "safety-limit-input");
+  assert.match(controller.state.error ?? "", /4K.*1M/);
+  controller.submitToolOutputSafetyLimit("256K");
+  assert.equal(controller.state.step, "confirm");
+  assert.equal(controller.draft.recentRawToolActions, 20);
+  assert.equal(controller.draft.toolOutputSafetyLimit, 262_144);
+});
+
+test("keeps global retention settings when the provider changes", () => {
+  const controller = new SettingsController({
+    initialConfig: {
+      ...existing,
+      recentRawToolActions: 7,
+      toolOutputSafetyLimit: 128 * 1024,
+    },
+    discoverModels: async () => ({ kind: "models", models: [] }),
+    onComplete: async () => undefined,
+  });
+
+  controller.selectProvider("openai");
+
+  assert.equal(controller.draft.recentRawToolActions, 7);
+  assert.equal(controller.draft.toolOutputSafetyLimit, 128 * 1024);
+});
+
+test("defaults every provider draft to high reasoning, 3 raw actions, and 64K", () => {
   for (const provider of ["zai", "openai", "custom"] as const) {
     const controller = controllerWith({ status: "success", models: ["model"] });
     controller.selectProvider(provider);
     assert.equal(controller.draft.reasoningEffort, "high");
+    assert.equal(controller.draft.recentRawToolActions, 3);
+    assert.equal(controller.draft.toolOutputSafetyLimit, 65_536);
   }
 });
 
@@ -147,6 +199,8 @@ test("settings view masks secrets and remains width safe", () => {
 
   const output = view.render(80).join("\n");
   assert.match(output, /••••1234/);
+  assert.match(stripAnsi(output), /raw 3/);
+  assert.match(stripAnsi(output), /limit 64K/);
   assert.equal(output.includes(existing.apiKey), false);
   for (const line of view.render(28)) {
     assert.ok(visibleWidth(line) <= 28, `${visibleWidth(line)} > 28`);

@@ -13,6 +13,13 @@ export type ReasoningEffort =
   | "xhigh"
   | "max";
 
+export const DEFAULT_RECENT_RAW_TOOL_ACTIONS = 3;
+export const MIN_RECENT_RAW_TOOL_ACTIONS = 1;
+export const MAX_RECENT_RAW_TOOL_ACTIONS = 20;
+export const DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT = 64 * 1024;
+export const MIN_TOOL_OUTPUT_SAFETY_LIMIT = 4 * 1024;
+export const MAX_TOOL_OUTPUT_SAFETY_LIMIT = 1024 * 1024;
+
 export interface AgentConfig {
   version: 1;
   provider: ProviderId;
@@ -20,6 +27,8 @@ export interface AgentConfig {
   baseURL?: string;
   model: string;
   reasoningEffort: ReasoningEffort;
+  recentRawToolActions: number;
+  toolOutputSafetyLimit: number;
 }
 
 export type ConfigLoadResult =
@@ -91,6 +100,26 @@ export async function saveConfig(
   }
 }
 
+export function parseCharacterLimit(value: string): number | undefined {
+  const match = value.trim().match(/^(\d+)\s*([kKmM])?$/);
+  if (!match) return undefined;
+  const amount = Number.parseInt(match[1], 10);
+  if (!Number.isSafeInteger(amount)) return undefined;
+  const multiplier = match[2]?.toLowerCase() === "m"
+    ? 1024 * 1024
+    : match[2]?.toLowerCase() === "k"
+      ? 1024
+      : 1;
+  const result = amount * multiplier;
+  return Number.isSafeInteger(result) ? result : undefined;
+}
+
+export function formatCharacterLimit(value: number): string {
+  if (value % (1024 * 1024) === 0) return `${value / (1024 * 1024)}M`;
+  if (value % 1024 === 0) return `${value / 1024}K`;
+  return value.toLocaleString("en-US");
+}
+
 export function maskApiKey(apiKey: string): string {
   if (!apiKey) return "설정 안 됨";
   if (apiKey.length <= 4) return "••••";
@@ -100,6 +129,10 @@ export function maskApiKey(apiKey: string): string {
 export function environmentConfigSeed(
   env: Record<string, string | undefined> = process.env,
 ): Partial<AgentConfig> {
+  const retention = {
+    recentRawToolActions: DEFAULT_RECENT_RAW_TOOL_ACTIONS,
+    toolOutputSafetyLimit: DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
+  };
   if (env.INLINE_BASE_URL) {
     return {
       provider: "custom",
@@ -107,6 +140,7 @@ export function environmentConfigSeed(
       baseURL: env.INLINE_BASE_URL,
       model: env.INLINE_MODEL ?? "gpt-5",
       reasoningEffort: "high",
+      ...retention,
     };
   }
   if (env.ZAI_API_KEY) {
@@ -115,6 +149,7 @@ export function environmentConfigSeed(
       apiKey: env.ZAI_API_KEY,
       model: env.INLINE_MODEL ?? "glm-5.2",
       reasoningEffort: "high",
+      ...retention,
     };
   }
   if (env.OPENAI_API_KEY) {
@@ -123,6 +158,7 @@ export function environmentConfigSeed(
       apiKey: env.OPENAI_API_KEY,
       model: env.INLINE_MODEL ?? "gpt-5",
       reasoningEffort: "high",
+      ...retention,
     };
   }
   return {};
@@ -149,6 +185,32 @@ function parseConfig(value: unknown): AgentConfig {
     );
   }
 
+  const recentRawToolActions = value.recentRawToolActions
+    ?? DEFAULT_RECENT_RAW_TOOL_ACTIONS;
+  if (
+    typeof recentRawToolActions !== "number"
+    || !Number.isInteger(recentRawToolActions)
+    || recentRawToolActions < MIN_RECENT_RAW_TOOL_ACTIONS
+    || recentRawToolActions > MAX_RECENT_RAW_TOOL_ACTIONS
+  ) {
+    throw new Error(
+      `recentRawToolActions must be an integer from ${MIN_RECENT_RAW_TOOL_ACTIONS} to ${MAX_RECENT_RAW_TOOL_ACTIONS}`,
+    );
+  }
+
+  const toolOutputSafetyLimit = value.toolOutputSafetyLimit
+    ?? DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT;
+  if (
+    typeof toolOutputSafetyLimit !== "number"
+    || !Number.isInteger(toolOutputSafetyLimit)
+    || toolOutputSafetyLimit < MIN_TOOL_OUTPUT_SAFETY_LIMIT
+    || toolOutputSafetyLimit > MAX_TOOL_OUTPUT_SAFETY_LIMIT
+  ) {
+    throw new Error(
+      `toolOutputSafetyLimit must be an integer from ${MIN_TOOL_OUTPUT_SAFETY_LIMIT} to ${MAX_TOOL_OUTPUT_SAFETY_LIMIT}`,
+    );
+  }
+
   let baseURL: string | undefined;
   if (value.provider === "custom") {
     if (typeof value.baseURL !== "string" || value.baseURL.length === 0) {
@@ -168,6 +230,8 @@ function parseConfig(value: unknown): AgentConfig {
     ...(baseURL ? { baseURL } : {}),
     model: value.model.trim(),
     reasoningEffort: value.reasoningEffort as ReasoningEffort,
+    recentRawToolActions,
+    toolOutputSafetyLimit,
   };
 }
 

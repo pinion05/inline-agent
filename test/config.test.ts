@@ -6,9 +6,13 @@ import { dirname, join } from "node:path";
 
 import {
   CONFIG_FILE,
+  DEFAULT_RECENT_RAW_TOOL_ACTIONS,
+  DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
   environmentConfigSeed,
+  formatCharacterLimit,
   loadConfig,
   maskApiKey,
+  parseCharacterLimit,
   saveConfig,
   type AgentConfig,
 } from "../src/config.js";
@@ -19,6 +23,8 @@ const validConfig: AgentConfig = {
   apiKey: "secret-key-1234",
   model: "glm-5.2",
   reasoningEffort: "high",
+  recentRawToolActions: 3,
+  toolOutputSafetyLimit: 65_536,
 };
 
 async function tempConfigPath(t: test.TestContext): Promise<string> {
@@ -76,6 +82,47 @@ test("reports missing and corrupt configs without rewriting them", async (t) => 
   assert.equal(await import("node:fs/promises").then(({ readFile }) => readFile(path, "utf8")), corrupt);
 });
 
+test("fills retention defaults when an existing v1 config omits them", async (t) => {
+  const path = await tempConfigPath(t);
+  await mkdir(dirname(path), { recursive: true });
+  const { recentRawToolActions, toolOutputSafetyLimit, ...legacy } = validConfig;
+  await writeFile(path, JSON.stringify(legacy));
+
+  const result = await loadConfig(path);
+
+  assert.equal(result.status, "valid");
+  if (result.status === "valid") {
+    assert.equal(result.config.recentRawToolActions, DEFAULT_RECENT_RAW_TOOL_ACTIONS);
+    assert.equal(result.config.toolOutputSafetyLimit, DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT);
+  }
+});
+
+test("rejects invalid retention ranges", async (t) => {
+  const path = await tempConfigPath(t);
+  await mkdir(dirname(path), { recursive: true });
+  for (const invalid of [
+    { recentRawToolActions: 0 },
+    { recentRawToolActions: 21 },
+    { toolOutputSafetyLimit: 4095 },
+    { toolOutputSafetyLimit: 1_048_577 },
+  ]) {
+    await writeFile(path, JSON.stringify({ ...validConfig, ...invalid }));
+    const result = await loadConfig(path);
+    assert.equal(result.status, "invalid");
+  }
+});
+
+test("parses and formats character limits", () => {
+  assert.equal(parseCharacterLimit("65536"), 65_536);
+  assert.equal(parseCharacterLimit("64K"), 65_536);
+  assert.equal(parseCharacterLimit("1m"), 1_048_576);
+  assert.equal(parseCharacterLimit(" 256 k "), 262_144);
+  assert.equal(parseCharacterLimit("nope"), undefined);
+  assert.equal(formatCharacterLimit(65_536), "64K");
+  assert.equal(formatCharacterLimit(1_048_576), "1M");
+  assert.equal(formatCharacterLimit(5_000), "5,000");
+});
+
 test("rejects invalid schema and provider-specific reasoning", async (t) => {
   const path = await tempConfigPath(t);
   await mkdir(dirname(path), { recursive: true });
@@ -112,12 +159,16 @@ test("builds first-run seeds from existing environment variables", () => {
     apiKey: "z-key",
     model: "glm-5.2",
     reasoningEffort: "high",
+    recentRawToolActions: 3,
+    toolOutputSafetyLimit: 65_536,
   });
   assert.deepEqual(environmentConfigSeed({ OPENAI_API_KEY: "o-key" }), {
     provider: "openai",
     apiKey: "o-key",
     model: "gpt-5",
     reasoningEffort: "high",
+    recentRawToolActions: 3,
+    toolOutputSafetyLimit: 65_536,
   });
   assert.deepEqual(environmentConfigSeed({
     INLINE_BASE_URL: "https://example.test/v1",
@@ -129,5 +180,7 @@ test("builds first-run seeds from existing environment variables", () => {
     baseURL: "https://example.test/v1",
     model: "custom-model",
     reasoningEffort: "high",
+    recentRawToolActions: 3,
+    toolOutputSafetyLimit: 65_536,
   });
 });

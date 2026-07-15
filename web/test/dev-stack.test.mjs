@@ -20,20 +20,26 @@ function child(name) {
   };
 }
 
-test('dashboard shows the cumulative number of eliminated tokens', () => {
+test('dashboard separates safety truncation from request projection', () => {
   const component = readFileSync(
     new URL('../src/components/ContextApp.tsx', import.meta.url),
     'utf8',
   );
 
-  assert.match(component, /label="소거한 불필요토큰"/);
-  assert.match(component, /snapshot\(\)\.stats\.eliminatedTokens/);
+  assert.match(component, /label="안전 상한 소거"/);
+  assert.match(component, /snapshot\(\)\.stats\.safetyTruncatedTokens/);
+  assert.match(component, /label="현재 요청 압축"/);
+  assert.match(component, /snapshot\(\)\.stats\.currentProjectionTokens/);
+  assert.match(component, /label="Raw Actions"/);
+  assert.match(component, /snapshot\(\)\.stats\.effectiveRawActions/);
+  assert.match(component, /snapshot\(\)\.stats\.configuredRawActions/);
   assert.match(component, /label="캐시히트"/);
   assert.match(component, /snapshot\(\)\.stats\.cacheHitTokens/);
   assert.match(component, /label="전체 캐시 비율"/);
   assert.match(component, /s\.cacheHitTokens \/ s\.totalPromptTokens/);
   assert.match(component, /setSnapshot\(normalizeSnapshot/);
-  assert.match(component, /eliminatedTokens: next\.stats\.eliminatedTokens \?\? 0/);
+  assert.match(component, /safetyTruncatedTokens: next\.stats\.safetyTruncatedTokens \?\? 0/);
+  assert.match(component, /currentProjectionTokens: next\.stats\.currentProjectionTokens \?\? 0/);
   assert.match(component, /실제 SYSTEM PROMPT/);
   assert.match(component, /시스템 프롬프트 없음/);
   assert.match(component, /실제 TOOL DEFINITIONS/);

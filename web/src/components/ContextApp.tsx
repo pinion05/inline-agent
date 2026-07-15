@@ -18,6 +18,10 @@ interface Stats {
   messageCount: number;
   contextWindow: number;
   eliminatedTokens: number;
+  safetyTruncatedTokens: number;
+  currentProjectionTokens: number;
+  configuredRawActions: number;
+  effectiveRawActions: number;
   totalPromptTokens: number;
   cacheHitTokens: number;
   compressionHistory: {
@@ -43,6 +47,10 @@ function normalizeSnapshot(next: Snapshot): Snapshot {
     stats: {
       ...next.stats,
       eliminatedTokens: next.stats.eliminatedTokens ?? 0,
+      safetyTruncatedTokens: next.stats.safetyTruncatedTokens ?? 0,
+      currentProjectionTokens: next.stats.currentProjectionTokens ?? 0,
+      configuredRawActions: next.stats.configuredRawActions ?? 3,
+      effectiveRawActions: next.stats.effectiveRawActions ?? 3,
       totalPromptTokens: next.stats.totalPromptTokens ?? 0,
       cacheHitTokens: next.stats.cacheHitTokens ?? 0,
       compressionHistory: (next.stats.compressionHistory ?? []).map((item) => ({
@@ -77,6 +85,10 @@ export default function ContextApp() {
       messageCount: 0,
       contextWindow: 0,
       eliminatedTokens: 0,
+      safetyTruncatedTokens: 0,
+      currentProjectionTokens: 0,
+      configuredRawActions: 3,
+      effectiveRawActions: 3,
       totalPromptTokens: 0,
       cacheHitTokens: 0,
       compressionHistory: [],
@@ -136,9 +148,19 @@ export default function ContextApp() {
           <Stat label="Model" value={snapshot().apiModel ?? '—'} />
           <Stat label="Reasoning" value={snapshot().apiReasoningEffort ?? '—'} />
           <Stat
-            label="소거한 불필요토큰"
-            value={snapshot().stats.eliminatedTokens.toLocaleString()}
+            label="안전 상한 소거"
+            value={snapshot().stats.safetyTruncatedTokens.toLocaleString()}
             color="#f0883e"
+          />
+          <Stat
+            label="현재 요청 압축"
+            value={snapshot().stats.currentProjectionTokens.toLocaleString()}
+            color="#d29922"
+          />
+          <Stat
+            label="Raw Actions"
+            value={`${snapshot().stats.effectiveRawActions}/${snapshot().stats.configuredRawActions}`}
+            color="#d29922"
           />
           <Stat
             label="캐시히트"

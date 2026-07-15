@@ -17,7 +17,15 @@ import {
 } from "@earendil-works/pi-tui";
 
 import {
+  DEFAULT_RECENT_RAW_TOOL_ACTIONS,
+  DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
+  MAX_RECENT_RAW_TOOL_ACTIONS,
+  MAX_TOOL_OUTPUT_SAFETY_LIMIT,
+  MIN_RECENT_RAW_TOOL_ACTIONS,
+  MIN_TOOL_OUTPUT_SAFETY_LIMIT,
+  formatCharacterLimit,
   maskApiKey,
+  parseCharacterLimit,
   type AgentConfig,
   type ProviderId,
   type ReasoningEffort,
@@ -36,6 +44,10 @@ export type SettingsStep =
   | "model"
   | "model-input"
   | "reasoning"
+  | "raw-actions"
+  | "raw-actions-input"
+  | "safety-limit"
+  | "safety-limit-input"
   | "confirm"
   | "saving"
   | "done";
@@ -53,6 +65,8 @@ export interface SettingsDraft {
   baseURL?: string;
   model: string;
   reasoningEffort: ReasoningEffort;
+  recentRawToolActions: number;
+  toolOutputSafetyLimit: number;
 }
 
 interface SettingsControllerOptions {
@@ -87,6 +101,10 @@ export class SettingsController {
       ...(source.baseURL ? { baseURL: source.baseURL } : {}),
       model: source.model ?? definition.defaultModel,
       reasoningEffort: source.reasoningEffort ?? "high",
+      recentRawToolActions: source.recentRawToolActions
+        ?? DEFAULT_RECENT_RAW_TOOL_ACTIONS,
+      toolOutputSafetyLimit: source.toolOutputSafetyLimit
+        ?? DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
     };
   }
 
@@ -174,11 +192,73 @@ export class SettingsController {
   selectReasoning(reasoningEffort: ReasoningEffort): void {
     if (!this.availableReasoningEfforts().includes(reasoningEffort)) return;
     this.draft.reasoningEffort = reasoningEffort;
+    this.setState({ step: "raw-actions", models: this.state.models });
+  }
+
+  selectRecentRawToolActions(value: number): void {
+    if (
+      !Number.isInteger(value)
+      || value < MIN_RECENT_RAW_TOOL_ACTIONS
+      || value > MAX_RECENT_RAW_TOOL_ACTIONS
+    ) return;
+    this.draft.recentRawToolActions = value;
+    this.setState({ step: "safety-limit", models: this.state.models });
+  }
+
+  chooseCustomRecentRawToolActions(): void {
+    this.setState({ step: "raw-actions-input", models: this.state.models });
+  }
+
+  submitRecentRawToolActions(value: string): void {
+    const parsed = Number(value.trim());
+    if (
+      !Number.isInteger(parsed)
+      || parsed < MIN_RECENT_RAW_TOOL_ACTIONS
+      || parsed > MAX_RECENT_RAW_TOOL_ACTIONS
+    ) {
+      this.setState({
+        step: "raw-actions-input",
+        models: this.state.models,
+        error: `최근 raw actions는 ${MIN_RECENT_RAW_TOOL_ACTIONS}–${MAX_RECENT_RAW_TOOL_ACTIONS} 사이여야 합니다.`,
+      });
+      return;
+    }
+    this.selectRecentRawToolActions(parsed);
+  }
+
+  selectToolOutputSafetyLimit(value: number): void {
+    if (
+      !Number.isInteger(value)
+      || value < MIN_TOOL_OUTPUT_SAFETY_LIMIT
+      || value > MAX_TOOL_OUTPUT_SAFETY_LIMIT
+    ) return;
+    this.draft.toolOutputSafetyLimit = value;
     this.setState({ step: "confirm", models: this.state.models });
   }
 
-  backToReasoning(): void {
-    this.setState({ step: "reasoning", models: this.state.models });
+  chooseCustomToolOutputSafetyLimit(): void {
+    this.setState({ step: "safety-limit-input", models: this.state.models });
+  }
+
+  submitToolOutputSafetyLimit(value: string): void {
+    const parsed = parseCharacterLimit(value);
+    if (
+      parsed === undefined
+      || parsed < MIN_TOOL_OUTPUT_SAFETY_LIMIT
+      || parsed > MAX_TOOL_OUTPUT_SAFETY_LIMIT
+    ) {
+      this.setState({
+        step: "safety-limit-input",
+        models: this.state.models,
+        error: "단일 출력 상한은 4K–1M 사이여야 합니다.",
+      });
+      return;
+    }
+    this.selectToolOutputSafetyLimit(parsed);
+  }
+
+  backToSafetyLimit(): void {
+    this.setState({ step: "safety-limit", models: this.state.models });
   }
 
   async confirm(): Promise<void> {
@@ -232,6 +312,8 @@ export class SettingsController {
         : {}),
       model: this.draft.model,
       reasoningEffort: this.draft.reasoningEffort,
+      recentRawToolActions: this.draft.recentRawToolActions,
+      toolOutputSafetyLimit: this.draft.toolOutputSafetyLimit,
     };
   }
 
@@ -288,7 +370,7 @@ export class SettingsView implements Component, Focusable {
     const provider = providerDefinition(this.controller.draft.provider).label;
     this.root.addChild(new Text(
       tuiTheme.muted(
-        `${provider} │ ${this.controller.draft.model} │ reasoning ${this.controller.draft.reasoningEffort} │ key ${maskApiKey(this.controller.draft.apiKey)}`,
+        `${provider} │ ${this.controller.draft.model} │ reasoning ${this.controller.draft.reasoningEffort} │ raw ${this.controller.draft.recentRawToolActions} │ limit ${formatCharacterLimit(this.controller.draft.toolOutputSafetyLimit)} │ max raw ${formatApproximateCharacters(MAX_RECENT_RAW_TOOL_ACTIONS * this.controller.draft.toolOutputSafetyLimit)} │ key ${maskApiKey(this.controller.draft.apiKey)}`,
       ),
       1,
       0,
@@ -367,16 +449,52 @@ export class SettingsView implements Component, Focusable {
           })),
           (value) => this.controller.selectReasoning(value as ReasoningEffort),
         );
+      case "raw-actions":
+        return this.selector(
+          "최근 몇 개 tool action을 원문으로 보존할까요?",
+          [1, 2, 3, 5, 10, 20].map((value) => ({
+            value: String(value),
+            label: `${value} actions`,
+          })).concat([{ value: "custom", label: "직접 입력 (1–20)" }]),
+          (value) => value === "custom"
+            ? this.controller.chooseCustomRecentRawToolActions()
+            : this.controller.selectRecentRawToolActions(Number(value)),
+        );
+      case "raw-actions-input": {
+        const input = new Input();
+        input.setValue(String(this.controller.draft.recentRawToolActions));
+        input.onSubmit = (value) => this.controller.submitRecentRawToolActions(value);
+        return this.inputGroup("최근 raw actions를 입력하세요 (1–20)", input);
+      }
+      case "safety-limit":
+        return this.selector(
+          "단일 shell 출력 안전 상한을 선택하세요",
+          [4 * 1024, 16 * 1024, 64 * 1024, 256 * 1024, 1024 * 1024]
+            .map((value) => ({
+              value: String(value),
+              label: formatCharacterLimit(value),
+            }))
+            .concat([{ value: "custom", label: "직접 입력 (4K–1M)" }]),
+          (value) => value === "custom"
+            ? this.controller.chooseCustomToolOutputSafetyLimit()
+            : this.controller.selectToolOutputSafetyLimit(Number(value)),
+        );
+      case "safety-limit-input": {
+        const input = new Input();
+        input.setValue(formatCharacterLimit(this.controller.draft.toolOutputSafetyLimit));
+        input.onSubmit = (value) => this.controller.submitToolOutputSafetyLimit(value);
+        return this.inputGroup("출력 상한을 입력하세요 (예: 65536, 64K, 1M)", input);
+      }
       case "confirm":
         return this.selector(
           "이 설정을 저장하고 적용할까요?",
           [
             { value: "save", label: "저장 및 적용" },
-            { value: "back", label: "reasoning 다시 선택" },
+            { value: "back", label: "출력 상한 다시 선택" },
           ],
           (value) => value === "save"
             ? void this.controller.confirm()
-            : this.controller.backToReasoning(),
+            : this.controller.backToSafetyLimit(),
         );
       case "saving":
         return new Text(tuiTheme.warning("◌ 설정 저장 중..."), 1, 0);
@@ -421,6 +539,14 @@ export class SettingsView implements Component, Focusable {
       handleInput: (data) => input.handleInput?.(data),
     } as Component & Focusable;
   }
+}
+
+function formatApproximateCharacters(value: number): string {
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(2).replace(/\.00$/, "")}M chars`;
+  }
+  if (value >= 1024) return `${Math.round(value / 1024)}K chars`;
+  return `${value} chars`;
 }
 
 class SearchableSelect implements Component {

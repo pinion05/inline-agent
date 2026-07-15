@@ -8,17 +8,21 @@
  */
 import type OpenAI from "openai";
 import { runShell } from "./shell.js";
-import { needsCompression, type Message, type UsageInfo } from "./compact.js";
-import type { ReasoningEffort } from "./config.js";
-import type { AgentEvent, AgentEventHandler } from "./agent-events.js";
-import { compressTrajectory } from "./trajectory.js";
-import { skillsAnnouncement } from "./skills.js";
-import { loadSystemPrompt, prependSystemPrompt } from "./system-prompt.js";
+import type { Message, UsageInfo } from "./compact.js";
 import {
-  estimateTokens,
+  DEFAULT_RECENT_RAW_TOOL_ACTIONS,
+  DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
+  type ReasoningEffort,
+} from "./config.js";
+import { buildContextProjection } from "./context-projection.js";
+import type { AgentEvent, AgentEventHandler } from "./agent-events.js";
+import { compactCanonicalTrajectory } from "./trajectory.js";
+import { skillsAnnouncement } from "./skills.js";
+import { loadSystemPrompt } from "./system-prompt.js";
+import {
   recordApiContext,
   recordCompression,
-  recordEliminatedTokens,
+  recordSafetyTruncation,
   recordUsage,
   updateContext,
 } from "./server.js";
@@ -28,18 +32,13 @@ const SHELL_TOOL = {
   function: {
     name: "shell",
     description:
-      "Execute a shell command. Returns stdout and stderr. Output is truncated to the last 500 non-whitespace chars; if truncated, a temp file path is provided for full access via tail/grep/head.",
+      "Execute a shell command. Returns stdout and stderr. Abnormally large output is capped by the user safety limit and the full output path is provided for targeted follow-up reads.",
     parameters: {
       type: "object",
       properties: {
         command: {
           type: "string",
           description: "The shell command to execute.",
-        },
-        max_length: {
-          type: "integer",
-          description:
-            "Override output truncation limit (non-ws chars). 0 = no truncation. Default: 500.",
         },
       },
       required: ["command"],
@@ -53,6 +52,8 @@ export interface RunOptions {
   client: OpenAI;
   model: string;
   reasoningEffort: ReasoningEffort;
+  recentRawToolActions: number;
+  toolOutputSafetyLimit: number;
   contextWindow: number;
   messages: Message[];
   skillsInjected?: boolean;
@@ -96,8 +97,7 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
   messages.push({ role: "user", content: effectiveInput });
   updateContext(messages, contextWindow, "user input");
 
-  // Apply trajectory compression before starting.
-  maybeCompress(opts);
+  compactCanonical(opts);
 
   const systemPromptLoader = opts.systemPromptLoader ?? loadSystemPrompt;
   for (let i = 0; i < MAX_ITERATIONS; i++) {
@@ -105,16 +105,27 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
     updateContext(messages, contextWindow, `LLM call #${i + 1}...`);
     const systemPrompt = await systemPromptLoader();
     opts.signal?.throwIfAborted();
-    const apiMessages = prependSystemPrompt(messages, systemPrompt);
+    const configuredRawActions = opts.recentRawToolActions
+      ?? DEFAULT_RECENT_RAW_TOOL_ACTIONS;
+    const projection = buildContextProjection({
+      messages,
+      systemPrompt,
+      tools: [SHELL_TOOL],
+      configuredRawActions,
+      maxInputTokens: Math.max(0, contextWindow - 16_384),
+    });
     const request = {
       model,
-      messages: apiMessages as any,
+      messages: projection.apiMessages as any,
       tools: [SHELL_TOOL],
       reasoning_effort: reasoningEffort as any,
     };
-    recordApiContext(apiMessages, request.tools, {
+    recordApiContext(projection.apiMessages, request.tools, {
       model,
       reasoningEffort,
+      configuredRawActions: projection.configuredRawActions,
+      effectiveRawActions: projection.effectiveRawActions,
+      projectionTokens: projection.compressionTokens,
     });
 
     const response = await client.chat.completions.create(request, {
@@ -169,7 +180,6 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
       const tc = msg.tool_calls[toolIndex];
       const args = JSON.parse(tc.function.arguments);
       const command: string = args.command;
-      const maxLength: number | undefined = args.max_length;
 
       emit(opts, {
         type: "tool-start",
@@ -182,7 +192,8 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
       let result;
       try {
         result = await runShell(command, {
-          maxLength,
+          safetyLimit: opts.toolOutputSafetyLimit
+            ?? DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
           signal: opts.signal,
         });
       } catch (error) {
@@ -198,7 +209,7 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
         }
         throw error;
       }
-      recordEliminatedTokens(result.eliminatedTokens);
+      recordSafetyTruncation(result.eliminatedTokens);
       emit(opts, {
         type: "tool-complete",
         id: tc.id,
@@ -217,8 +228,7 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
       updateContext(messages, contextWindow, "tool result");
     }
 
-    // Apply trajectory compression after each tool round.
-    maybeCompress(opts);
+    compactCanonical(opts);
   }
 
   const content = "[max iterations reached]";
@@ -227,28 +237,23 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
   return content;
 }
 
-function maybeCompress(opts: RunOptions): void {
-  const { messages, contextWindow, lastUsage } = opts;
-  if (needsCompression(messages, contextWindow, lastUsage)) {
-    const before = messages.length;
-    const beforeTokens = estimateTokens(messages);
-    const compressed = compressTrajectory(messages);
-    messages.length = 0;
-    messages.push(...compressed);
-    const eliminatedTokens = Math.max(
-      0,
-      beforeTokens - estimateTokens(messages)
-    );
-    opts.lastUsage = undefined;
-    recordCompression(before, messages.length, eliminatedTokens);
-    updateContext(messages, contextWindow, `compressed: ${before} → ${messages.length}`);
-    emit(opts, {
-      type: "compression",
-      before,
-      after: messages.length,
-      eliminatedTokens,
-    });
-  }
+function compactCanonical(opts: RunOptions): void {
+  const { messages, contextWindow } = opts;
+  const before = messages.length;
+  const compacted = compactCanonicalTrajectory(messages);
+  if (compacted.compressedActions === 0) return;
+
+  messages.length = 0;
+  messages.push(...compacted.messages);
+  opts.lastUsage = undefined;
+  recordCompression(before, messages.length, compacted.eliminatedTokens);
+  updateContext(messages, contextWindow, `recovery ring: ${before} → ${messages.length}`);
+  emit(opts, {
+    type: "compression",
+    before,
+    after: messages.length,
+    eliminatedTokens: compacted.eliminatedTokens,
+  });
 }
 
 function emit(opts: RunOptions, event: AgentEvent): void {

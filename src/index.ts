@@ -9,6 +9,8 @@ import * as readline from "node:readline";
 
 import type { AgentEvent } from "./agent-events.js";
 import {
+  DEFAULT_RECENT_RAW_TOOL_ACTIONS,
+  DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
   environmentConfigSeed,
   loadConfig,
   type AgentConfig,
@@ -79,6 +81,10 @@ function configForLineMode(
         : {}),
       model: seed.model,
       reasoningEffort: seed.reasoningEffort,
+      recentRawToolActions: seed.recentRawToolActions
+        ?? DEFAULT_RECENT_RAW_TOOL_ACTIONS,
+      toolOutputSafetyLimit: seed.toolOutputSafetyLimit
+        ?? DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
     };
   }
   return loaded.status === "valid" ? loaded.config : undefined;
@@ -106,6 +112,8 @@ async function startLineMode(config: AgentConfig): Promise<void> {
     client,
     model: config.model,
     reasoningEffort: config.reasoningEffort,
+    recentRawToolActions: config.recentRawToolActions,
+    toolOutputSafetyLimit: config.toolOutputSafetyLimit,
     contextWindow,
     messages,
     skillsInjected: false,

@@ -11,76 +11,69 @@
  *   CoACT (2026): 33% reduction, +3.5% pass@1 improvement
  *   "Long contexts actively degrade LLM performance" (Liu et al. 2023)
  */
-import type { Message } from "./compact.js";
+import { estimateTokens, type Message } from "./compact.js";
 
-const KEEP_ACTIONS = 3; // keep last N action groups (assistant+tool)
+const KEEP_ACTIONS = 3; // default recent action groups (assistant+tool)
+export const MAX_RECOVERABLE_TOOL_ACTIONS = 20;
 
 /**
  * Compress old trajectory entries, keeping only recent turns intact.
  * Old assistant+tool pairs become single text messages.
  */
 export function compressTrajectory(messages: Message[]): Message[] {
-  if (messages.length === 0) return messages;
-
-  // Find the cut index: keep last KEEP_ACTIONS action groups.
-  const cutIndex = findCutIndex(messages, KEEP_ACTIONS);
-  if (cutIndex <= 0) return messages;
-
-  const old = messages.slice(0, cutIndex);
-  const recent = messages.slice(cutIndex);
-
-  // Merge old assistant+tool pairs into compact text messages.
-  const compressed = mergeOldMessages(old);
-
-  return [...compressed, ...recent];
+  return projectTrajectory(messages, KEEP_ACTIONS);
 }
 
-/**
- * Find where to cut: keep last N action groups (assistant+tool pairs).
- * Never cut between an assistant(tool_calls) and its tool(result).
- * User messages are always kept as-is.
- */
-function findCutIndex(messages: Message[], keepActions: number): number {
-  // Count action groups (assistant with tool_calls) from the end.
-  let actionCount = 0;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "assistant" && messages[i].tool_calls?.length) {
-      actionCount++;
-      if (actionCount > keepActions) {
-        // Found the cut point — this assistant and its tools should be compressed.
-        // But don't split: include the full group (assistant + following tools).
-        return i;
-      }
-    }
+/** Build an immutable request view that keeps exactly N recent tool actions raw. */
+export function projectTrajectory(
+  messages: Message[],
+  keepActions: number,
+): Message[] {
+  if (!Number.isInteger(keepActions) || keepActions < 0) {
+    throw new Error("keepActions must be a non-negative integer");
   }
-  return -1;
+  if (messages.length === 0) return [];
+
+  const actionIndices = messages
+    .map((message, index) => (
+      message.role === "assistant" && message.tool_calls?.length ? index : -1
+    ))
+    .filter((index) => index >= 0);
+  if (actionIndices.length <= keepActions) return messages.slice();
+
+  const recentStart = keepActions === 0
+    ? messages.length
+    : actionIndices[actionIndices.length - keepActions];
+  const old = messages.slice(0, recentStart);
+  const recent = messages.slice(recentStart);
+  return [...mergeOldMessages(old), ...recent];
 }
 
-/**
- * Never split between assistant(tool_calls) and tool(result).
- * If the cut lands inside a tool group, move forward to the end of it.
- */
-function adjustToGroupBoundary(messages: Message[], index: number): number {
-  const msg = messages[index];
-  if (msg.role === "user" && !msg.tool_calls?.length) return index;
-  if (msg.role === "assistant" && !msg.tool_calls?.length) return index;
+export function countRawToolActions(messages: Message[]): number {
+  return messages.reduce(
+    (count, message) => count + (
+      message.role === "assistant" && message.tool_calls?.length ? 1 : 0
+    ),
+    0,
+  );
+}
 
-  // If this is a tool result or assistant with tool_calls,
-  // move forward to after the group.
-  if (msg.role === "tool") {
-    // Find the matching assistant(tool_calls) for this tool_call_id.
-    const callId = msg.tool_call_id;
-    for (let i = index; i >= 0; i--) {
-      if (
-        messages[i].role === "assistant" &&
-        messages[i].tool_calls?.some((tc: any) => tc.id === callId)
-      ) {
-        return i; // Keep the assistant+tool group together in "recent"
-      }
-    }
-  }
-
-  return index;
+export function compactCanonicalTrajectory(
+  messages: Message[],
+  maxRawActions: number = MAX_RECOVERABLE_TOOL_ACTIONS,
+): {
+  messages: Message[];
+  compressedActions: number;
+  eliminatedTokens: number;
+} {
+  const beforeActions = countRawToolActions(messages);
+  const beforeTokens = estimateTokens(messages);
+  const projected = projectTrajectory(messages, maxRawActions);
+  return {
+    messages: projected,
+    compressedActions: beforeActions - countRawToolActions(projected),
+    eliminatedTokens: Math.max(0, beforeTokens - estimateTokens(projected)),
+  };
 }
 
 /**
