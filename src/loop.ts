@@ -11,6 +11,7 @@ import { runShell } from "./shell.js";
 import { needsCompression, type Message, type UsageInfo } from "./compact.js";
 import { compressTrajectory } from "./trajectory.js";
 import { skillsAnnouncement } from "./skills.js";
+import { updateContext, recordCompression } from "./server.js";
 
 const SHELL_TOOL = {
   type: "function" as const,
@@ -61,11 +62,14 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
   }
 
   messages.push({ role: "user", content: effectiveInput });
+  updateContext(messages, contextWindow, "user input");
 
   // Apply trajectory compression before starting.
   maybeCompress(opts);
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
+    updateContext(messages, contextWindow, `LLM call #${i + 1}...`);
+
     const response = await client.chat.completions.create({
       model,
       messages: messages as any,
@@ -99,9 +103,11 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
       }));
     }
     messages.push(entry);
+    updateContext(messages, contextWindow, "assistant response");
 
     // No tool calls → agent is done.
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
+      updateContext(messages, contextWindow, "done");
       return msg.content ?? "";
     }
 
@@ -112,6 +118,7 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
       const maxLength: number | undefined = args.max_length;
 
       process.stderr.write(`  $ ${command}\n`);
+      updateContext(messages, contextWindow, `$ ${command}`);
 
       const result = await runShell(command, { maxLength });
       messages.push({
@@ -119,12 +126,14 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
         tool_call_id: tc.id,
         content: result.output,
       });
+      updateContext(messages, contextWindow, "tool result");
     }
 
     // Apply trajectory compression after each tool round.
     maybeCompress(opts);
   }
 
+  updateContext(messages, contextWindow, "max iterations");
   return "[max iterations reached]";
 }
 
@@ -136,7 +145,9 @@ function maybeCompress(opts: RunOptions): void {
     const compressed = compressTrajectory(messages);
     messages.length = 0;
     messages.push(...compressed);
-    opts.lastUsage = undefined; // invalidate after modification
+    opts.lastUsage = undefined;
+    recordCompression(before, messages.length);
+    updateContext(messages, contextWindow, `compressed: ${before} → ${messages.length}`);
     process.stderr.write(
       `[trajectory compressed: ${before} → ${messages.length} messages]\n`
     );

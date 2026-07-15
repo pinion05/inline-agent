@@ -13,6 +13,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { run } from "./loop.js";
+import { startServer } from "./server.js";
 import type { Message } from "./compact.js";
 
 const CONFIG_DIR = join(homedir(), ".inline-agent");
@@ -164,6 +165,8 @@ function startAgent(baseURL: string | undefined, apiKey: string, model: string) 
   const client = baseURL
     ? new OpenAI({ baseURL, apiKey })
     : new OpenAI({ apiKey });
+
+  startServer();
 
   const messages: Message[] = [];
   const rl = readline.createInterface({

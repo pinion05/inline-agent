@@ -3,3 +3,8 @@ dist/
 *.js
 *.d.ts
 !src/**
+!web/src/**
+
+# web build output
+web/dist/
+web/node_modules/
