@@ -2,7 +2,7 @@
 /**
  * Inline Agent — entry point.
  *
- * Zero system prompt. One shell tool. Invisible context sanitization.
+ * Optional user system prompt. One shell tool. Invisible context sanitization.
  * Rule-based trajectory compression.
  *
  * Defaults to Z.AI Coding Plan (glm-5.2).

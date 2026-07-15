@@ -1,7 +1,7 @@
 /**
  * The agent loop. As thin as it gets.
  *
- * System prompt: 0 lines.
+ * System prompt: optional, loaded from ~/.inlineagent/system.md.
  * Tool: shell (one).
  * Sanitization: invisible.
  * Trajectory compression: invisible.
@@ -12,6 +12,7 @@ import { needsCompression, type Message, type UsageInfo } from "./compact.js";
 import { compressTrajectory } from "./trajectory.js";
 import { skillsAnnouncement } from "./skills.js";
 import { formatToolLine, supportsColor } from "./tui.js";
+import { loadSystemPrompt, prependSystemPrompt } from "./system-prompt.js";
 import {
   estimateTokens,
   recordApiContext,
@@ -54,6 +55,7 @@ interface RunOptions {
   messages: Message[];
   skillsInjected?: boolean;
   lastUsage?: UsageInfo;
+  systemPromptLoader?: () => Promise<string | undefined>;
 }
 
 export async function run(opts: RunOptions, userInput: string): Promise<string> {
@@ -75,14 +77,17 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
   // Apply trajectory compression before starting.
   maybeCompress(opts);
 
+  const systemPromptLoader = opts.systemPromptLoader ?? loadSystemPrompt;
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     updateContext(messages, contextWindow, `LLM call #${i + 1}...`);
+    const systemPrompt = await systemPromptLoader();
+    const apiMessages = prependSystemPrompt(messages, systemPrompt);
     const request = {
       model,
-      messages: messages as any,
+      messages: apiMessages as any,
       tools: [SHELL_TOOL],
     };
-    recordApiContext(messages, request.tools);
+    recordApiContext(apiMessages, request.tools);
 
     const response = await client.chat.completions.create(request);
 
