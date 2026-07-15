@@ -77,13 +77,14 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     updateContext(messages, contextWindow, `LLM call #${i + 1}...`);
-    recordApiContext(messages);
-
-    const response = await client.chat.completions.create({
+    const request = {
       model,
       messages: messages as any,
       tools: [SHELL_TOOL],
-    });
+    };
+    recordApiContext(messages, request.tools);
+
+    const response = await client.chat.completions.create(request);
 
     const msg = response.choices[0].message;
 

@@ -18,6 +18,7 @@ const WEB_DIST = join(__dirname, "..", "web", "dist");
 
 let currentMessages: Message[] = [];
 let lastApiMessages: Message[] = [];
+let lastApiTools: unknown[] = [];
 let currentStats: Stats = {
   totalTokens: 0,
   messageCount: 0,
@@ -59,6 +60,7 @@ export function getSnapshot() {
   return {
     stats: currentStats,
     apiMessages: lastApiMessages,
+    apiTools: lastApiTools,
     messages: currentMessages.map((m) => ({
       role: m.role,
       content: m.content ?? "",
@@ -77,8 +79,9 @@ function broadcast() {
   for (const res of clients) res.write(`data: ${data}\n\n`);
 }
 
-export function recordApiContext(messages: Message[]) {
+export function recordApiContext(messages: Message[], tools: unknown[]) {
   lastApiMessages = structuredClone(messages);
+  lastApiTools = structuredClone(tools);
   broadcast();
 }
 

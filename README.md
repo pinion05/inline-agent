@@ -106,7 +106,7 @@ AgentDiet가 LLM에게 `erase` 도구를 줬다.
 npm run dev
 ```
 
-브라우저에서 [http://localhost:7878/](http://localhost:7878/)을 열면 마지막 LLM API 호출 직전에 전송된 컨텍스트 원문 전체와 현재 토큰 사용량, 소거한 불필요 토큰, 캐시 히트 비율을 실시간으로 확인할 수 있다.
+브라우저에서 [http://localhost:7878/](http://localhost:7878/)을 열면 마지막 LLM API 호출 직전의 시스템 프롬프트, tool 정의, 컨텍스트 원문 전체와 현재 토큰 사용량, 소거한 불필요 토큰, 캐시 히트 비율을 실시간으로 확인할 수 있다.
 
 ## References
 

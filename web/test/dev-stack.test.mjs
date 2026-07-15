@@ -34,6 +34,10 @@ test('dashboard shows the cumulative number of eliminated tokens', () => {
   assert.match(component, /s\.cacheHitTokens \/ s\.totalPromptTokens/);
   assert.match(component, /setSnapshot\(normalizeSnapshot/);
   assert.match(component, /eliminatedTokens: next\.stats\.eliminatedTokens \?\? 0/);
+  assert.match(component, /실제 SYSTEM PROMPT/);
+  assert.match(component, /시스템 프롬프트 없음/);
+  assert.match(component, /실제 TOOL DEFINITIONS/);
+  assert.match(component, /JSON\.stringify\(snapshot\(\)\.apiTools/);
   assert.match(component, /실제 LLM 컨텍스트/);
   assert.match(component, /<For each=\{snapshot\(\)\.apiMessages\}>/);
   assert.match(component, /props\.msg\.content/);

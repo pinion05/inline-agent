@@ -32,6 +32,7 @@ interface Stats {
 interface Snapshot {
   stats: Stats;
   apiMessages: ApiMessage[];
+  apiTools: unknown[];
 }
 
 function normalizeSnapshot(next: Snapshot): Snapshot {
@@ -48,6 +49,7 @@ function normalizeSnapshot(next: Snapshot): Snapshot {
       })),
     },
     apiMessages: next.apiMessages ?? [],
+    apiTools: next.apiTools ?? [],
   };
 }
 
@@ -77,6 +79,7 @@ export default function ContextApp() {
       lastAction: 'connecting...',
     },
     apiMessages: [],
+    apiTools: [],
   });
   let es: EventSource | undefined;
 
@@ -91,9 +94,13 @@ export default function ContextApp() {
 
   onCleanup(() => es?.close());
 
+  const systemMessages = () => snapshot().apiMessages.filter(
+    (message) => message.role === 'system',
+  );
+
   const apiTokens = () => snapshot().apiMessages.reduce(
     (total, message) => total + estimateMessageTokens(message),
-    0,
+    Math.ceil(JSON.stringify(snapshot().apiTools).length / 4),
   );
 
   const usagePct = () => {
@@ -178,8 +185,28 @@ export default function ContextApp() {
         </div>
       </Show>
 
+      {/* Exact system prompt */}
+      <ContextSectionTitle title="실제 SYSTEM PROMPT" subtitle="API messages의 system 역할 원문" />
+      <Show
+        when={systemMessages().length > 0}
+        fallback={<EmptyContext>시스템 프롬프트 없음</EmptyContext>}
+      >
+        <For each={systemMessages()}>
+          {(message) => <RawBlock value={message.content} />}
+        </For>
+      </Show>
+
+      {/* Exact tool definitions */}
+      <ContextSectionTitle title="실제 TOOL DEFINITIONS" subtitle="API 요청에 포함된 tools 원문 전체" />
+      <Show
+        when={snapshot().apiTools.length > 0}
+        fallback={<EmptyContext>Tool 정의 없음</EmptyContext>}
+      >
+        <RawBlock value={JSON.stringify(snapshot().apiTools, null, 2)} />
+      </Show>
+
       {/* Exact API context */}
-      <div style={{ 'margin-bottom': '12px' }}>
+      <div style={{ 'margin': '20px 0 12px' }}>
         <div style={{ color: '#58a6ff', 'font-size': '15px', 'font-weight': '700' }}>
           실제 LLM 컨텍스트
         </div>
@@ -288,6 +315,40 @@ function ApiMessageCard(props: { msg: ApiMessage; index: number }) {
         'line-height': '1.5', 'max-height': '600px', overflow: 'auto',
       }}>{JSON.stringify(props.msg, null, 2)}</pre>
     </div>
+  );
+}
+
+function ContextSectionTitle(props: { title: string; subtitle: string }) {
+  return (
+    <div style={{ 'margin': '20px 0 8px' }}>
+      <div style={{ color: '#58a6ff', 'font-size': '15px', 'font-weight': '700' }}>
+        {props.title}
+      </div>
+      <div style={{ color: '#8b949e', 'font-size': '11px', 'margin-top': '3px' }}>
+        {props.subtitle}
+      </div>
+    </div>
+  );
+}
+
+function RawBlock(props: { value: string }) {
+  return (
+    <pre style={{
+      margin: '0 0 10px', padding: '12px 14px',
+      background: '#0d1117', color: '#c9d1d9',
+      'border-radius': '8px', 'white-space': 'pre-wrap',
+      'word-break': 'break-word', 'font-size': '12px',
+      'line-height': '1.55', 'max-height': '600px', overflow: 'auto',
+    }}>{props.value}</pre>
+  );
+}
+
+function EmptyContext(props: { children: any }) {
+  return (
+    <div style={{
+      padding: '12px 14px', color: '#8b949e', background: '#161b22',
+      'border-radius': '8px', 'font-size': '12px',
+    }}>{props.children}</div>
   );
 }
 
