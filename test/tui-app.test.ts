@@ -252,6 +252,7 @@ test("handles settings, clear, and exit commands without sending them", async ()
 
   await app.submit("/settings");
   assert.ok(app.settingsController);
+  assert.equal(app.settingsController?.state.step, "menu");
   assert.equal(inputs.includes("/settings"), false);
 
   app.closeSettings();

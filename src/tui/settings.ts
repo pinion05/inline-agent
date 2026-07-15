@@ -37,6 +37,7 @@ import {
 import { tuiTheme } from "./theme.js";
 
 export type SettingsStep =
+  | "menu"
   | "provider"
   | "api-key"
   | "base-url"
@@ -84,13 +85,14 @@ export class SettingsController {
 
   private readonly options: SettingsControllerOptions;
   private readonly listeners = new Set<() => void>();
+  private returnToMenuAfterEdit = false;
 
   constructor(options: SettingsControllerOptions) {
     this.options = options;
-    if (options.initialError) this.state = {
-      step: "provider",
+    this.state = {
+      step: options.initialConfig ? "menu" : "provider",
       models: [],
-      error: options.initialError,
+      ...(options.initialError ? { error: options.initialError } : {}),
     };
     const source = options.initialConfig ?? options.seed ?? {};
     const provider = source.provider ?? "zai";
@@ -111,6 +113,26 @@ export class SettingsController {
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  startProviderSetup(): void {
+    this.returnToMenuAfterEdit = false;
+    this.setState({ step: "provider", models: [] });
+  }
+
+  editReasoning(): void {
+    this.returnToMenuAfterEdit = true;
+    this.setState({ step: "reasoning", models: this.state.models });
+  }
+
+  editRecentRawToolActions(): void {
+    this.returnToMenuAfterEdit = true;
+    this.setState({ step: "raw-actions", models: this.state.models });
+  }
+
+  editToolOutputSafetyLimit(): void {
+    this.returnToMenuAfterEdit = true;
+    this.setState({ step: "safety-limit", models: this.state.models });
   }
 
   selectProvider(provider: ProviderId): void {
@@ -192,6 +214,7 @@ export class SettingsController {
   selectReasoning(reasoningEffort: ReasoningEffort): void {
     if (!this.availableReasoningEfforts().includes(reasoningEffort)) return;
     this.draft.reasoningEffort = reasoningEffort;
+    if (this.finishMenuEdit()) return;
     this.setState({ step: "raw-actions", models: this.state.models });
   }
 
@@ -202,6 +225,7 @@ export class SettingsController {
       || value > MAX_RECENT_RAW_TOOL_ACTIONS
     ) return;
     this.draft.recentRawToolActions = value;
+    if (this.finishMenuEdit()) return;
     this.setState({ step: "safety-limit", models: this.state.models });
   }
 
@@ -233,6 +257,7 @@ export class SettingsController {
       || value > MAX_TOOL_OUTPUT_SAFETY_LIMIT
     ) return;
     this.draft.toolOutputSafetyLimit = value;
+    if (this.finishMenuEdit()) return;
     this.setState({ step: "confirm", models: this.state.models });
   }
 
@@ -263,13 +288,16 @@ export class SettingsController {
 
   async confirm(): Promise<void> {
     const config = this.toConfig();
+    const failureStep: SettingsStep = this.state.step === "menu"
+      ? "menu"
+      : "confirm";
     this.setState({ step: "saving", models: this.state.models });
     try {
       await this.options.onComplete(config);
       this.setState({ step: "done", models: this.state.models });
     } catch (error) {
       this.setState({
-        step: "confirm",
+        step: failureStep,
         models: this.state.models,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -278,6 +306,13 @@ export class SettingsController {
 
   cancel(): void {
     this.options.onCancel?.();
+  }
+
+  private finishMenuEdit(): boolean {
+    if (!this.returnToMenuAfterEdit) return false;
+    this.returnToMenuAfterEdit = false;
+    this.setState({ step: "menu", models: this.state.models });
+    return true;
   }
 
   private async discover(): Promise<void> {
@@ -396,6 +431,37 @@ export class SettingsView implements Component, Focusable {
 
   private createActiveComponent(): Component {
     switch (this.controller.state.step) {
+      case "menu":
+        return this.selector(
+          "변경할 설정을 선택하세요",
+          [
+            { value: "provider", label: "Provider / API Key / Model" },
+            {
+              value: "reasoning",
+              label: `Reasoning: ${this.controller.draft.reasoningEffort}`,
+            },
+            {
+              value: "raw-actions",
+              label: `Raw tool actions: ${this.controller.draft.recentRawToolActions}`,
+            },
+            {
+              value: "safety-limit",
+              label: `Output safety limit: ${formatCharacterLimit(this.controller.draft.toolOutputSafetyLimit)}`,
+            },
+            { value: "save", label: "저장 및 적용" },
+            { value: "cancel", label: "취소" },
+          ],
+          (value) => {
+            if (value === "provider") this.controller.startProviderSetup();
+            else if (value === "reasoning") this.controller.editReasoning();
+            else if (value === "raw-actions") {
+              this.controller.editRecentRawToolActions();
+            } else if (value === "safety-limit") {
+              this.controller.editToolOutputSafetyLimit();
+            } else if (value === "save") void this.controller.confirm();
+            else this.controller.cancel();
+          },
+        );
       case "provider":
         return this.selector(
           "Provider를 선택하세요",

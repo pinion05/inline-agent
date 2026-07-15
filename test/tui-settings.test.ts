@@ -87,6 +87,39 @@ test("completes provider, auth, model, reasoning, and confirmation steps", async
   assert.equal(controller.state.step, "done");
 });
 
+test("opens a direct settings menu for an existing chat config", async () => {
+  const completed: AgentConfig[] = [];
+  const controller = controllerWith(
+    { status: "success", models: ["glm-5.2"] },
+    { initialConfig: existing, completed },
+  );
+
+  assert.equal(controller.state.step, "menu");
+
+  controller.editReasoning();
+  assert.equal(controller.state.step, "reasoning");
+  controller.selectReasoning("max");
+  assert.equal(controller.state.step, "menu");
+
+  controller.editRecentRawToolActions();
+  assert.equal(controller.state.step, "raw-actions");
+  controller.selectRecentRawToolActions(5);
+  assert.equal(controller.state.step, "menu");
+
+  controller.editToolOutputSafetyLimit();
+  assert.equal(controller.state.step, "safety-limit");
+  controller.selectToolOutputSafetyLimit(262_144);
+  assert.equal(controller.state.step, "menu");
+
+  await controller.confirm();
+  assert.deepEqual(completed, [{
+    ...existing,
+    reasoningEffort: "max",
+    recentRawToolActions: 5,
+    toolOutputSafetyLimit: 262_144,
+  }]);
+});
+
 test("retains an existing key when the API key field is empty", async () => {
   const controller = controllerWith(
     { status: "success", models: ["glm-5.2"] },
@@ -198,7 +231,11 @@ test("settings view masks secrets and remains width safe", () => {
   const view = new SettingsView(new TUI(new FakeTerminal()), controller);
 
   const output = view.render(80).join("\n");
+  const plain = stripAnsi(output);
   assert.match(output, /••••1234/);
+  assert.match(plain, /Provider \/ API Key \/ Model/);
+  assert.match(plain, /Raw tool actions: 3/);
+  assert.match(plain, /Output safety limit: 64K/);
   assert.match(stripAnsi(output), /raw 3/);
   assert.match(stripAnsi(output), /limit 64K/);
   assert.equal(output.includes(existing.apiKey), false);

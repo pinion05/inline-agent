@@ -122,7 +122,7 @@ inline-agent
 
 TTY에서는 터미널 스크롤백을 보존하는 inline retained-mode UI가 실행된다. 최초 실행 시 설정 화면에서 Z.AI Coding Plan, OpenAI 또는 Custom OpenAI-compatible provider를 선택하고 API Key를 입력한다. 인증 후 `/models`에서 가져온 모델을 검색해 선택하거나 모델 ID를 직접 입력할 수 있다.
 
-설정은 `~/.inlineagent/config.json`에 저장된다. 디렉터리 권한은 `0700`, 설정 파일은 `0600`이며 API Key는 TUI에서 마스킹된다. 실행 중 `/settings`를 열어 provider, 모델, reasoning, 최근 raw tool action 수, 단일 출력 안전 상한을 변경해도 기존 대화는 유지되고 다음 API 호출부터 새 설정이 적용된다.
+설정은 `~/.inlineagent/config.json`에 저장된다. 디렉터리 권한은 `0700`, 설정 파일은 `0600`이며 API Key는 TUI에서 마스킹된다. 실행 중 채팅창에서 `/settings`를 입력하면 Provider/API Key/Model, reasoning, 최근 raw tool action 수, 단일 출력 안전 상한에 바로 접근하는 설정 메뉴가 열린다. 설정을 변경해도 기존 대화는 유지되고 다음 API 호출부터 새 설정이 적용된다.
 
 기본값은 최근 tool action `3`개 원문 보존과 단일 출력 `64K` 문자 상한이다. action 수는 `1–20`, 상한은 `4K–1M` 범위에서 preset 또는 직접 입력으로 설정한다. 최근 최대 20개 action만 raw recovery ring에 유지하고 더 오래된 action은 영구 압축하므로 메모리가 무제한 증가하지 않는다. 상한을 넘은 전체 출력은 `~/.inlineagent/log/`에 저장된다.
 
