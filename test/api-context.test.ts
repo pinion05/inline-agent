@@ -8,12 +8,18 @@ import type { Message } from "../src/compact.js";
 test("captures the exact request-only system prompt, messages, and tools", async () => {
   let sentMessages: Message[] = [];
   let sentTools: unknown[] = [];
+  let sentReasoning: string | undefined;
   const client = {
     chat: {
       completions: {
-        create: async (request: { messages: Message[]; tools: unknown[] }) => {
+        create: async (request: {
+          messages: Message[];
+          tools: unknown[];
+          reasoning_effort?: string;
+        }) => {
           sentMessages = structuredClone(request.messages);
           sentTools = structuredClone(request.tools);
+          sentReasoning = request.reasoning_effort;
           return {
             choices: [{ message: { content: "ok", tool_calls: [] } }],
           };
@@ -27,6 +33,7 @@ test("captures the exact request-only system prompt, messages, and tools", async
     {
       client: client as any,
       model: "test-model",
+      reasoningEffort: "high",
       contextWindow: 100_000,
       messages,
       skillsInjected: true,
@@ -38,6 +45,9 @@ test("captures the exact request-only system prompt, messages, and tools", async
   const snapshot = getSnapshot();
   assert.deepEqual(snapshot.apiMessages, sentMessages);
   assert.deepEqual(snapshot.apiTools, sentTools);
+  assert.equal(sentReasoning, "high");
+  assert.equal(snapshot.apiModel, "test-model");
+  assert.equal(snapshot.apiReasoningEffort, "high");
   assert.deepEqual(sentMessages, [
     { role: "system", content: "exact system prompt\n" },
     { role: "user", content: "exact user input" },
@@ -88,6 +98,7 @@ test("reloads the system prompt before every tool-loop API call", async () => {
     {
       client: client as any,
       model: "test-model",
+      reasoningEffort: "low",
       contextWindow: 100_000,
       messages,
       skillsInjected: true,
@@ -109,4 +120,5 @@ test("reloads the system prompt before every tool-loop API call", async () => {
   ]);
   assert.equal(messages.some((message) => message.role === "system"), false);
   assert.deepEqual(getSnapshot().apiMessages, sentRequests[1]);
+  assert.equal(getSnapshot().apiReasoningEffort, "low");
 });

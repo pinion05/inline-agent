@@ -9,9 +9,10 @@
 import type OpenAI from "openai";
 import { runShell } from "./shell.js";
 import { needsCompression, type Message, type UsageInfo } from "./compact.js";
+import type { ReasoningEffort } from "./config.js";
+import type { AgentEvent, AgentEventHandler } from "./agent-events.js";
 import { compressTrajectory } from "./trajectory.js";
 import { skillsAnnouncement } from "./skills.js";
-import { formatToolLine, supportsColor } from "./tui.js";
 import { loadSystemPrompt, prependSystemPrompt } from "./system-prompt.js";
 import {
   estimateTokens,
@@ -48,18 +49,32 @@ const SHELL_TOOL = {
 
 const MAX_ITERATIONS = 50;
 
-interface RunOptions {
+export interface RunOptions {
   client: OpenAI;
   model: string;
+  reasoningEffort: ReasoningEffort;
   contextWindow: number;
   messages: Message[];
   skillsInjected?: boolean;
   lastUsage?: UsageInfo;
   systemPromptLoader?: () => Promise<string | undefined>;
+  onEvent?: AgentEventHandler;
 }
 
 export async function run(opts: RunOptions, userInput: string): Promise<string> {
-  const { client, model, contextWindow, messages } = opts;
+  emit(opts, { type: "run-start", input: userInput });
+  try {
+    return await executeRun(opts, userInput);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    updateContext(opts.messages, opts.contextWindow, `error: ${message}`);
+    emit(opts, { type: "error", message });
+    throw error;
+  }
+}
+
+async function executeRun(opts: RunOptions, userInput: string): Promise<string> {
+  const { client, model, reasoningEffort, contextWindow, messages } = opts;
 
   // First message: inject skills list into user input (not system prompt).
   let effectiveInput = userInput;
@@ -86,8 +101,12 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
       model,
       messages: apiMessages as any,
       tools: [SHELL_TOOL],
+      reasoning_effort: reasoningEffort as any,
     };
-    recordApiContext(apiMessages, request.tools);
+    recordApiContext(apiMessages, request.tools, {
+      model,
+      reasoningEffort,
+    });
 
     const response = await client.chat.completions.create(request);
 
@@ -126,8 +145,10 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
 
     // No tool calls → agent is done.
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
+      const content = msg.content ?? "";
       updateContext(messages, contextWindow, "done");
-      return msg.content ?? "";
+      emit(opts, { type: "assistant-complete", content });
+      return content;
     }
 
     // Execute tool calls.
@@ -136,13 +157,26 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
       const command: string = args.command;
       const maxLength: number | undefined = args.max_length;
 
-      process.stderr.write(
-        formatToolLine(command, supportsColor(process.stderr)) + "\n"
-      );
+      emit(opts, {
+        type: "tool-start",
+        id: tc.id,
+        name: tc.function.name,
+        command,
+      });
       updateContext(messages, contextWindow, `$ ${command}`);
 
       const result = await runShell(command, { maxLength });
       recordEliminatedTokens(result.eliminatedTokens);
+      emit(opts, {
+        type: "tool-complete",
+        id: tc.id,
+        name: tc.function.name,
+        command,
+        output: result.output,
+        exitCode: result.exitCode,
+        truncated: result.truncated,
+        eliminatedTokens: result.eliminatedTokens,
+      });
       messages.push({
         role: "tool",
         tool_call_id: tc.id,
@@ -155,14 +189,15 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
     maybeCompress(opts);
   }
 
+  const content = "[max iterations reached]";
   updateContext(messages, contextWindow, "max iterations");
-  return "[max iterations reached]";
+  emit(opts, { type: "assistant-complete", content });
+  return content;
 }
 
 function maybeCompress(opts: RunOptions): void {
   const { messages, contextWindow, lastUsage } = opts;
   if (needsCompression(messages, contextWindow, lastUsage)) {
-    process.stderr.write("[compressing trajectory...]\n");
     const before = messages.length;
     const beforeTokens = estimateTokens(messages);
     const compressed = compressTrajectory(messages);
@@ -175,8 +210,15 @@ function maybeCompress(opts: RunOptions): void {
     opts.lastUsage = undefined;
     recordCompression(before, messages.length, eliminatedTokens);
     updateContext(messages, contextWindow, `compressed: ${before} → ${messages.length}`);
-    process.stderr.write(
-      `[trajectory compressed: ${before} → ${messages.length} messages]\n`
-    );
+    emit(opts, {
+      type: "compression",
+      before,
+      after: messages.length,
+      eliminatedTokens,
+    });
   }
+}
+
+function emit(opts: RunOptions, event: AgentEvent): void {
+  opts.onEvent?.(event);
 }

@@ -1,0 +1,126 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import type { AgentEvent } from "../src/agent-events.js";
+import type { Message } from "../src/compact.js";
+import { run } from "../src/loop.js";
+
+function toolThenAnswerClient() {
+  let calls = 0;
+  return {
+    chat: {
+      completions: {
+        create: async () => {
+          calls++;
+          if (calls === 1) {
+            return {
+              choices: [{
+                message: {
+                  content: "",
+                  tool_calls: [{
+                    id: "call_1",
+                    type: "function",
+                    function: {
+                      name: "shell",
+                      arguments: JSON.stringify({ command: "printf event-output" }),
+                    },
+                  }],
+                },
+              }],
+            };
+          }
+          return {
+            choices: [{ message: { content: "finished", tool_calls: [] } }],
+          };
+        },
+      },
+    },
+  };
+}
+
+test("emits ordered run, tool, and assistant events without terminal writes", async () => {
+  const events: AgentEvent[] = [];
+  const messages: Message[] = [];
+  const writes: string[] = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    writes.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+
+  try {
+    const reply = await run(
+      {
+        client: toolThenAnswerClient() as any,
+        model: "test-model",
+        reasoningEffort: "high",
+        contextWindow: 100_000,
+        messages,
+        skillsInjected: true,
+        systemPromptLoader: async () => undefined,
+        onEvent: (event) => events.push(event),
+      },
+      "run it",
+    );
+
+    assert.equal(reply, "finished");
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+
+  assert.deepEqual(events.map((event) => event.type), [
+    "run-start",
+    "tool-start",
+    "tool-complete",
+    "assistant-complete",
+  ]);
+  assert.deepEqual(events[1], {
+    type: "tool-start",
+    id: "call_1",
+    name: "shell",
+    command: "printf event-output",
+  });
+  assert.equal(events[2].type, "tool-complete");
+  if (events[2].type === "tool-complete") {
+    assert.equal(events[2].output, "event-output\n[exit: 0]");
+  }
+  assert.deepEqual(events[3], {
+    type: "assistant-complete",
+    content: "finished",
+  });
+  assert.deepEqual(writes, []);
+});
+
+test("emits an error event and preserves the thrown API failure", async () => {
+  const events: AgentEvent[] = [];
+  const failure = new Error("provider failed");
+  const client = {
+    chat: {
+      completions: {
+        create: async () => { throw failure; },
+      },
+    },
+  };
+
+  await assert.rejects(
+    run(
+      {
+        client: client as any,
+        model: "test-model",
+        reasoningEffort: "high",
+        contextWindow: 100_000,
+        messages: [],
+        skillsInjected: true,
+        systemPromptLoader: async () => undefined,
+        onEvent: (event) => events.push(event),
+      },
+      "fail",
+    ),
+    failure,
+  );
+
+  assert.deepEqual(events, [
+    { type: "run-start", input: "fail" },
+    { type: "error", message: "provider failed" },
+  ]);
+});

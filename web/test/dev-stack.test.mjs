@@ -38,6 +38,10 @@ test('dashboard shows the cumulative number of eliminated tokens', () => {
   assert.match(component, /시스템 프롬프트 없음/);
   assert.match(component, /실제 TOOL DEFINITIONS/);
   assert.match(component, /JSON\.stringify\(snapshot\(\)\.apiTools/);
+  assert.match(component, /label="Model"/);
+  assert.match(component, /snapshot\(\)\.apiModel/);
+  assert.match(component, /label="Reasoning"/);
+  assert.match(component, /snapshot\(\)\.apiReasoningEffort/);
   assert.match(component, /실제 LLM 컨텍스트/);
   assert.match(component, /<For each=\{snapshot\(\)\.apiMessages\}>/);
   assert.match(component, /props\.msg\.content/);
@@ -49,6 +53,10 @@ test('root dev command launches the combined CLI and web stack without recursion
   const rootPackage = JSON.parse(
     readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
   );
+  const script = readFileSync(
+    new URL('../scripts/dev-stack.mjs', import.meta.url),
+    'utf8',
+  );
   const commands = getDevCommands();
 
   assert.equal(rootPackage.scripts.dev, 'node web/scripts/dev-stack.mjs');
@@ -56,6 +64,10 @@ test('root dev command launches the combined CLI and web stack without recursion
   assert.deepEqual(commands.build.args, ['run', 'build']);
   assert.deepEqual(commands.backend.args, ['run', 'dev:agent']);
   assert.deepEqual(commands.web.args, ['run', 'dev:astro']);
+  assert.match(
+    script,
+    /function spawnWeb\(\)[\s\S]*?stdio: \['ignore', 'ignore', 'ignore'\]/,
+  );
 });
 
 test('starts the backend and waits for SSE before starting Astro', async () => {

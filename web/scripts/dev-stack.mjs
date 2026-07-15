@@ -97,7 +97,8 @@ function spawnWeb() {
   return spawn(web.command, web.args, {
     cwd: web.cwd,
     env: process.env,
-    stdio: ['ignore', 'inherit', 'inherit'],
+    // Astro runs beside the retained TUI; inherited output would corrupt it.
+    stdio: ['ignore', 'ignore', 'ignore'],
   });
 }
 

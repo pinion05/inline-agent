@@ -19,6 +19,8 @@ const WEB_DIST = join(__dirname, "..", "web", "dist");
 let currentMessages: Message[] = [];
 let lastApiMessages: Message[] = [];
 let lastApiTools: unknown[] = [];
+let lastApiModel: string | null = null;
+let lastApiReasoningEffort: string | null = null;
 let currentStats: Stats = {
   totalTokens: 0,
   messageCount: 0,
@@ -61,6 +63,8 @@ export function getSnapshot() {
     stats: currentStats,
     apiMessages: lastApiMessages,
     apiTools: lastApiTools,
+    apiModel: lastApiModel,
+    apiReasoningEffort: lastApiReasoningEffort,
     messages: currentMessages.map((m) => ({
       role: m.role,
       content: m.content ?? "",
@@ -79,9 +83,15 @@ function broadcast() {
   for (const res of clients) res.write(`data: ${data}\n\n`);
 }
 
-export function recordApiContext(messages: Message[], tools: unknown[]) {
+export function recordApiContext(
+  messages: Message[],
+  tools: unknown[],
+  metadata: { model: string; reasoningEffort: string },
+) {
   lastApiMessages = structuredClone(messages);
   lastApiTools = structuredClone(tools);
+  lastApiModel = metadata.model;
+  lastApiReasoningEffort = metadata.reasoningEffort;
   broadcast();
 }
 
@@ -133,7 +143,7 @@ export function recordUsage(promptTokens: number, cacheHitTokens: number) {
   broadcast();
 }
 
-export function startServer(): void {
+export function startServer(options: { silent?: boolean } = {}): void {
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     // CORS
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -187,6 +197,6 @@ export function startServer(): void {
   });
 
   server.listen(PORT, () => {
-    process.stderr.write(`📊 http://localhost:${PORT}\n`);
+    if (!options.silent) process.stderr.write(`📊 http://localhost:${PORT}\n`);
   });
 }

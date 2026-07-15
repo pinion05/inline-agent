@@ -33,6 +33,8 @@ interface Snapshot {
   stats: Stats;
   apiMessages: ApiMessage[];
   apiTools: unknown[];
+  apiModel: string | null;
+  apiReasoningEffort: string | null;
 }
 
 function normalizeSnapshot(next: Snapshot): Snapshot {
@@ -50,6 +52,8 @@ function normalizeSnapshot(next: Snapshot): Snapshot {
     },
     apiMessages: next.apiMessages ?? [],
     apiTools: next.apiTools ?? [],
+    apiModel: next.apiModel ?? null,
+    apiReasoningEffort: next.apiReasoningEffort ?? null,
   };
 }
 
@@ -80,6 +84,8 @@ export default function ContextApp() {
     },
     apiMessages: [],
     apiTools: [],
+    apiModel: null,
+    apiReasoningEffort: null,
   });
   let es: EventSource | undefined;
 
@@ -127,6 +133,8 @@ export default function ContextApp() {
           <Stat label="Tokens" value={apiTokens().toLocaleString()} />
           <Stat label="Messages" value={String(snapshot().apiMessages.length)} />
           <Stat label="Context Window" value={snapshot().stats.contextWindow.toLocaleString()} />
+          <Stat label="Model" value={snapshot().apiModel ?? '—'} />
+          <Stat label="Reasoning" value={snapshot().apiReasoningEffort ?? '—'} />
           <Stat
             label="소거한 불필요토큰"
             value={snapshot().stats.eliminatedTokens.toLocaleString()}

@@ -106,7 +106,29 @@ AgentDiet가 LLM에게 `erase` 도구를 줬다.
 npm run dev
 ```
 
-브라우저에서 [http://localhost:7878/](http://localhost:7878/)을 열면 마지막 LLM API 호출 직전의 시스템 프롬프트, tool 정의, 컨텍스트 원문 전체와 현재 토큰 사용량, 소거한 불필요 토큰, 캐시 히트 비율을 실시간으로 확인할 수 있다.
+브라우저에서 [http://localhost:7878/](http://localhost:7878/)을 열면 마지막 LLM API 호출 직전의 시스템 프롬프트, tool 정의, 컨텍스트 원문 전체, 활성 model과 `reasoning_effort`, 현재 토큰 사용량, 소거한 불필요 토큰, 캐시 히트 비율을 실시간으로 확인할 수 있다.
+
+## Retained-mode TUI와 provider 설정
+
+TTY에서는 터미널 스크롤백을 보존하는 inline retained-mode UI가 실행된다. 최초 실행 시 설정 화면에서 Z.AI Coding Plan, OpenAI 또는 Custom OpenAI-compatible provider를 선택하고 API Key를 입력한다. 인증 후 `/models`에서 가져온 모델을 검색해 선택하거나 모델 ID를 직접 입력할 수 있다.
+
+설정은 `~/.inlineagent/config.json`에 저장된다. 디렉터리 권한은 `0700`, 설정 파일은 `0600`이며 API Key는 TUI에서 마스킹된다. 실행 중 `/settings`를 열어 provider, 모델, reasoning 값을 변경해도 기존 대화는 유지되고 다음 API 호출부터 새 설정이 적용된다.
+
+reasoning은 Auto 없이 provider 원본 값을 명시적으로 전송한다.
+
+- Z.AI: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`
+- OpenAI/Custom: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`
+- 모든 provider의 최초 선택값: `high`
+
+주요 조작:
+
+- `Enter`: 전송
+- `Ctrl+J` 또는 `Shift+Enter`: 개행
+- `/settings`: provider/model/reasoning 설정
+- `/clear`: 대화 초기화
+- `/exit`, `/quit`: 종료
+
+실행 중 추가로 전송한 입력은 FIFO 대기열에서 순서대로 처리된다.
 
 ## 시스템 프롬프트 설정
 

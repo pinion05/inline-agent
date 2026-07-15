@@ -2,178 +2,91 @@
 /**
  * Inline Agent — entry point.
  *
- * Optional user system prompt. One shell tool. Invisible context sanitization.
- * Rule-based trajectory compression.
- *
- * Defaults to Z.AI Coding Plan (glm-5.2).
+ * TTY: Pi-style retained-mode interface with provider settings.
+ * Non-TTY: line-oriented compatibility mode.
  */
-import OpenAI from "openai";
 import * as readline from "node:readline";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
-import { run } from "./loop.js";
+
+import type { AgentEvent } from "./agent-events.js";
+import {
+  environmentConfigSeed,
+  loadConfig,
+  type AgentConfig,
+} from "./config.js";
+import type { Message } from "./compact.js";
+import { run, type RunOptions } from "./loop.js";
+import {
+  createProviderClient,
+  guessContextWindow,
+  providerDefinition,
+} from "./provider.js";
 import { startServer } from "./server.js";
+import { InlineAgentApp } from "./tui/app.js";
 import {
   formatAgentReply,
+  formatToolLine,
   formatUserPrompt,
   resetStyle,
   supportsColor,
 } from "./tui.js";
-import type { Message } from "./compact.js";
 
-const CONFIG_DIR = join(homedir(), ".inline-agent");
-const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+async function main(): Promise<void> {
+  const loaded = await loadConfig();
+  const seed = environmentConfigSeed();
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  startServer({ silent: interactive });
 
-interface Config {
-  provider: "zai" | "openai" | "custom";
-  apiKey: string;
-  baseURL?: string;
-  model?: string;
-}
-
-function loadConfig(): Config | null {
-  try {
-    if (!existsSync(CONFIG_FILE)) return null;
-    return JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
-  } catch {
-    return null;
+  if (interactive) {
+    const app = new InlineAgentApp({
+      initialConfig: loaded.status === "valid" ? loaded.config : undefined,
+      configSeed: seed,
+      configError: loaded.status === "invalid" ? loaded.error : undefined,
+      onExit: () => {
+        process.stdout.write("\n");
+        process.exit(0);
+      },
+    });
+    process.once("SIGTERM", () => app.stop());
+    process.once("SIGHUP", () => app.stop());
+    app.start();
+    return;
   }
+
+  const config = configForLineMode(loaded, seed);
+  if (!config) {
+    process.stderr.write(
+      "설정이 없습니다. TTY에서 inline-agent를 실행해 설정하거나 "
+      + "INLINE_* 환경변수를 지정하세요.\n",
+    );
+    process.exitCode = 1;
+    return;
+  }
+  await startLineMode(config);
+  process.exit(0);
 }
 
-function saveConfig(config: Config): void {
-  mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-}
-
-function guessContextWindow(model: string): number {
-  const m = model.toLowerCase();
-  if (m.includes("glm-5")) return 1_000_000;
-  if (m.includes("gpt-5")) return 400_000;
-  if (m.includes("opus")) return 500_000;
-  if (m.includes("sonnet")) return 400_000;
-  if (m.includes("gemini")) return 1_000_000;
-  return 200_000;
-}
-
-function configToConnect(config: Config): {
-  baseURL?: string;
-  apiKey: string;
-  model: string;
-} {
-  if (config.provider === "zai") {
+function configForLineMode(
+  loaded: Awaited<ReturnType<typeof loadConfig>>,
+  seed: Partial<AgentConfig>,
+): AgentConfig | undefined {
+  if (seed.provider && seed.apiKey && seed.model && seed.reasoningEffort) {
     return {
-      baseURL: "https://api.z.ai/api/coding/paas/v4",
-      apiKey: config.apiKey,
-      model: config.model ?? "glm-5.2",
+      version: 1,
+      provider: seed.provider,
+      apiKey: seed.apiKey,
+      ...(seed.provider === "custom" && seed.baseURL
+        ? { baseURL: seed.baseURL }
+        : {}),
+      model: seed.model,
+      reasoningEffort: seed.reasoningEffort,
     };
   }
-  if (config.provider === "openai") {
-    return { apiKey: config.apiKey, model: config.model ?? "gpt-5" };
-  }
-  return {
-    baseURL: config.baseURL,
-    apiKey: config.apiKey,
-    model: config.model ?? "gpt-5",
-  };
+  return loaded.status === "valid" ? loaded.config : undefined;
 }
 
-async function main() {
-  const zaiKey = process.env.ZAI_API_KEY;
-  const openaiKey = process.env.OPENAI_API_KEY;
-
-  let baseURL: string | undefined;
-  let apiKey: string;
-  let model: string;
-
-  if (process.env.INLINE_BASE_URL) {
-    baseURL = process.env.INLINE_BASE_URL;
-    apiKey = process.env.INLINE_API_KEY ?? openaiKey ?? zaiKey ?? "";
-    model = process.env.INLINE_MODEL ?? "gpt-5";
-  } else if (zaiKey) {
-    baseURL = "https://api.z.ai/api/coding/paas/v4";
-    apiKey = zaiKey;
-    model = process.env.INLINE_MODEL ?? "glm-5.2";
-  } else if (openaiKey) {
-    apiKey = openaiKey;
-    model = process.env.INLINE_MODEL ?? "gpt-5";
-  } else {
-    // Check config file
-    const config = loadConfig();
-    if (config) {
-      const c = configToConnect(config);
-      baseURL = c.baseURL;
-      apiKey = c.apiKey;
-      model = c.model;
-    } else {
-      // First run — interactive setup
-      const c = await setupWizard();
-      baseURL = c.baseURL;
-      apiKey = c.apiKey;
-      model = c.model;
-    }
-  }
-
-  if (!apiKey) {
-    process.stderr.write("API Key가 없습니다. 설정 파일을 삭제하고 다시 시도:\n");
-    process.stderr.write(`  rm ${CONFIG_FILE}\n`);
-    process.exit(1);
-  }
-
-  startAgent(baseURL, apiKey, model);
-}
-
-async function setupWizard(): Promise<{ baseURL?: string; apiKey: string; model: string }> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
-
-  const ask = (q: string) =>
-    new Promise<string>((resolve) => rl.question(q, (a) => resolve(a.trim())));
-
-  process.stderr.write(
-    "\n╔══════════════════════════════════════════╗\n" +
-      "║        inline-agent 첫 실행 설정          ║\n" +
-      "╚══════════════════════════════════════════╝\n\n"
-  );
-  process.stderr.write("제공자 선택:\n");
-  process.stderr.write("  1. Z.AI Coding Plan (glm-5.2, 기본)\n");
-  process.stderr.write("  2. OpenAI\n");
-  process.stderr.write("  3. 커스텀 (OpenAI-compatible)\n\n");
-
-  const choice = await ask("선택 [1]: ");
-
-  let config: Config;
-  if (choice === "2") {
-    const key = await ask("OpenAI API Key: ");
-    config = { provider: "openai", apiKey: key };
-  } else if (choice === "3") {
-    const key = await ask("API Key: ");
-    const url = await ask("Base URL: ");
-    const model = await ask("Model: ");
-    config = { provider: "custom", apiKey: key, baseURL: url, model };
-  } else {
-    const key = await ask("Z.AI API Key: ");
-    config = { provider: "zai", apiKey: key };
-  }
-
-  rl.close();
-
-  saveConfig(config);
-  process.stderr.write(`\n설정 저장됨: ${CONFIG_FILE}\n\n`);
-
-  return configToConnect(config);
-}
-
-function startAgent(baseURL: string | undefined, apiKey: string, model: string) {
-  const contextWindow = guessContextWindow(model);
-  const client = baseURL
-    ? new OpenAI({ baseURL, apiKey })
-    : new OpenAI({ apiKey });
-
-  startServer();
-
+async function startLineMode(config: AgentConfig): Promise<void> {
+  const client = createProviderClient(config);
+  const contextWindow = guessContextWindow(config.model);
   const messages: Message[] = [];
   const promptColors = supportsColor(process.stderr);
   const replyColors = supportsColor(process.stdout);
@@ -183,48 +96,62 @@ function startAgent(baseURL: string | undefined, apiKey: string, model: string) 
     prompt: formatUserPrompt(promptColors),
   });
 
-  const provider = baseURL?.includes("z.ai")
-    ? "Z.AI"
-    : baseURL
-      ? "Custom"
-      : "OpenAI";
+  const provider = providerDefinition(config.provider).label;
   process.stderr.write(
-    `inline-agent | ${provider} ${model} | ctx=${contextWindow.toLocaleString()}\n\n`
+    `inline-agent | ${provider} ${config.model} | reasoning=${config.reasoningEffort} | ctx=${contextWindow.toLocaleString()}\n\n`,
   );
   rl.prompt();
 
-  const opts = {
+  const options: RunOptions = {
     client,
-    model,
+    model: config.model,
+    reasoningEffort: config.reasoningEffort,
     contextWindow,
     messages,
     skillsInjected: false,
+    onEvent: lineEventAdapter,
   };
 
-  rl.on("line", async (input: string) => {
+  for await (const input of rl) {
     process.stderr.write(resetStyle(promptColors));
     const trimmed = input.trim();
     if (!trimmed) {
       rl.prompt();
-      return;
+      continue;
     }
-    if (["/exit", "/quit"].includes(trimmed)) {
-      rl.close();
-      return;
-    }
+    if (trimmed === "/exit" || trimmed === "/quit") break;
     try {
-      const reply = await run(opts, trimmed);
-      process.stdout.write(formatAgentReply(reply, replyColors) + "\n\n");
-    } catch (e: any) {
-      process.stderr.write(`[error] ${e.message}\n\n`);
+      const reply = await run(options, trimmed);
+      process.stdout.write(`${formatAgentReply(reply, replyColors)}\n\n`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`[error] ${redact(message, config.apiKey)}\n\n`);
     }
     rl.prompt();
-  });
+  }
 
-  rl.on("close", () => {
-    process.stderr.write(resetStyle(promptColors) + "\n");
-    process.exit(0);
-  });
+  rl.close();
+  process.stderr.write(`${resetStyle(promptColors)}\n`);
 }
 
-main();
+function lineEventAdapter(event: AgentEvent): void {
+  if (event.type === "tool-start") {
+    process.stderr.write(
+      `${formatToolLine(event.command, supportsColor(process.stderr))}\n`,
+    );
+  } else if (event.type === "compression") {
+    process.stderr.write(
+      `[trajectory compressed: ${event.before} → ${event.after} messages, -${event.eliminatedTokens} tokens]\n`,
+    );
+  }
+}
+
+function redact(message: string, secret: string): string {
+  return secret ? message.replaceAll(secret, "[redacted]") : message;
+}
+
+void main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`[fatal] ${message}\n`);
+  process.exit(1);
+});
