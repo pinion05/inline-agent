@@ -100,6 +100,14 @@ AgentDiet가 LLM에게 `erase` 도구를 줬다.
 3. **고가치 토큰만 남긴다** — 에러, 실패, 변경사항은 보존. 나머지는 압축·삭제.
 4. **방해하지 않는다** — 시스템 프롬프트 0줄. 도구는 최소. LLM이 똑똑하므로 프레임워크는 조용히 한다.
 
+## 컨텍스트 투명성 대시보드
+
+```bash
+npm run dev
+```
+
+브라우저에서 [http://localhost:7878/](http://localhost:7878/)을 열면 마지막 LLM API 호출 직전에 전송된 컨텍스트 원문 전체와 현재 토큰 사용량, 소거한 불필요 토큰, 캐시 히트 비율을 실시간으로 확인할 수 있다.
+
 ## References
 
 - Xiao et al., *"Reducing Cost of LLM Agents with Trajectory Reduction"*, FSE 2026 — 트레이토리 쓰레기 분석, 40~60% 토큰 절감, LLM 자기 정리 불가 증명 · [arxiv.org/abs/2509.23586](https://arxiv.org/abs/2509.23586)
