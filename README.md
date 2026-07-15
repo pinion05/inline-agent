@@ -1,55 +1,86 @@
 # inline-agent
 
-> LLM은 이미 충분히 똑똑하다. 에이전트 프레임워크가 해야 할 일은 방해하지 않는 것뿐이다.
+> LLM은 이미 충분히 똑똑하다. 프레임워크가 할 일은 방해하지 않는 것과, 깨지지 않게 보호하는 것뿐이다.
 
-도구는 shell 하나. 시스템 프롬프트는 한 줄. 나머지는 전부 LLM의 지능에 맡긴다.
+도구는 shell 하나. 시스템 프롬프트는 0줄. LLM이 모르는 정보 정돈 레이어가 컨텍스트를 보호한다.
 
-## Philosophy
-
-대부분의 코딩 에이전트는 도구를 많이 만들고 프롬프트를 길게 쓴다 — `read`, `write`, `edit`, `search`, `find`, `lsp`, `browser`... 이 도구 정의와 시스템 프롬프트가 수천~수만 토큰을 잡아먹는다. 그 토큰이 실제 작업 컨텍스트에서 빠진다.
-
-근데 shell 하나면 저 도구 전부를 대체할 수 있다. 그리고 2026년의 LLM은 shell을 어떻게 쓰는지 이미 안다.
-
-**덜 주면 더 잘한다.**
-
-## Design
+## Architecture
 
 ```
-LLM ←→ shell
+┌──────────────────────────────────────────────────┐
+│  LLM (메인 모델)                                  │
+│  - 시스템 프롬프트: 0줄                           │
+│  - 인지하는 도구: shell 1개                        │
+├──────────────────────────────────────────────────┤
+│  정보 정돈 레이어 (LLM이 모르게 작동)              │
+│  - 500글자(공백제외) 하드 컷                       │
+│  - "Y for summary?" → 정돈 LLM 호출                │
+│  - Compaction: 50% 트리거, 10턴 보존               │
+├──────────────────────────────────────────────────┤
+│  Shell (실제 실행)                                 │
+│  - timeout 300초                                   │
+│  - 상태 관리는 LLM의 책임 (cd X && Y)              │
+└──────────────────────────────────────────────────┘
 ```
 
-| 원칙 | 구현 |
+## Design Principles
+
+1. **LLM은 이미 똑똑하다** — scaffolding을 최소화한다
+2. **도구는 shell 하나** — 오버헤드 0
+3. **시스템 프롬프트는 0줄** — 컨텍스트를 코드에 쓴다
+4. **정보 정돈 레이어** — LLM이 모르게 컨텍스트를 보호한다
+5. **Skills는 발견 기반** — 주입이 아니라 LLM이 필요할 때 읽는다
+
+## Shell Sanitization
+
+| 상황 | 동작 |
 |------|------|
-| 도구 1개 | `shell(command)` — 오버헤드 0 |
-| 시스템 프롬프트 1줄 | `"You are a coding agent with one tool: shell."` |
-| Persistent shell | cwd, 환경변수, 백그라운드 프로세스 유지 |
-| OpenAI-compatible | 어떤 모델이든 연결 (GPT, Claude proxy, GLM, local) |
-| 출력 보호 | 30K chars 초과 시 잘림 + 신호 |
-| 최소 컨텍스트 | 절약한 토큰을 코드베이스에 쓴다 |
+| 출력 ≤ 500글자 | 그대로 전달 |
+| 출력 > 500글자 | 500글자 컷 + "Y for summary?" |
+| `max_length=0` 지정 | truncation 없이 전체 리턴 |
+| LLM이 "Y" 응답 | 정돈 LLM 호출 → 요약본 전달 |
+| timeout (300s) | kill + "[timeout]" 리턴 |
+
+## Compaction
+
+| 항목 | 값 |
+|------|-----|
+| 트리거 | 컨텍스트 50% 도달 시 |
+| 보존 | 최근 10턴 (원본) |
+| 압축 | 나머지 전체 → 정돈 LLM |
+| 인지 | `[compacted history]` 태그 |
+
+## Skills
+
+```
+~/.inline-agent/skills/          # 유저 글로벌
+.inline-agent/skills/            # 프로젝트 로컬
+```
+
+스킬 파일은 주입되지 않는다. 첫 메시지 시 목록만 tool result에 append되고, LLM이 필요하면 `cat`으로 읽는다.
 
 ## Usage
 
 ```bash
-pip install -e .
+npm install
+npm run dev
 
 # OpenAI
 export OPENAI_API_KEY=sk-...
-inline-agent
 
 # Any OpenAI-compatible provider
 export INLINE_BASE_URL=https://api.z.ai/api/paas/v4
 export INLINE_MODEL=glm-5.2
 export OPENAI_API_KEY=your-key
-inline-agent
 ```
 
 ## Code
 
 ```
-src/inline_agent/
-├── main.py    # entry point — REPL
-├── loop.py    # agent loop (~60 lines)
-└── shell.py   # shell session (~50 lines)
+src/
+├── index.ts     # REPL entry point
+├── loop.ts      # agent loop — one tool, zero prompt
+├── shell.ts     # shell execution + sanitization layer
+├── compact.ts   # context compaction
+└── skills.ts    # skills discovery (not injection)
 ```
-
-전체 코드 약 120줄. 그 이상 필요 없다.

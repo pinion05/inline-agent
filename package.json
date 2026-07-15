@@ -1,0 +1,23 @@
+{
+  "name": "inline-agent",
+  "version": "0.1.0",
+  "description": "Minimal coding agent. One tool: shell. Zero system prompt.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "inline-agent": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "openai": "^4.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
