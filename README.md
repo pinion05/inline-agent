@@ -4,83 +4,67 @@
 
 도구는 shell 하나. 시스템 프롬프트는 0줄. LLM이 모르는 정보 정돈 레이어가 컨텍스트를 보호한다.
 
-## Architecture
+## 왜 이 구조인가 — 연구 근거
+
+### 1. 에이전트 비용의 99%는 입력 토큰이다
+
+Claude 4 Sonnet 기준, OpenRouter 일일 사용량 100B 토큰 중 **99%가 입력(재독) 토큰**, 생성은 1%에 불과하다. 에이전트가 한 번 발생시킨 트레이토리 토큰은 이후 매 스텝마다 재전송되어 누적된다.
+
+> *Source: Xiao et al., "Reducing Cost of LLM Agents with Trajectory Reduction", FSE 2026 ([arxiv.org/abs/2509.23586](https://arxiv.org/abs/2509.23586))*
+
+### 2. 트레이토리의 63%는 결과, 25%는 행동 — 둘 다 쓰레기가 많다
+
+SWE-bench Verified 평균 트레이토리 (48.4K 토큰, 40스텝):
 
 ```
-┌──────────────────────────────────────────────────┐
-│  LLM (메인 모델)                                  │
-│  - 시스템 프롬프트: 0줄                           │
-│  - 인지하는 도구: shell 1개                        │
-├──────────────────────────────────────────────────┤
-│  정보 정돈 레이어 (LLM이 모르게 작동)              │
-│  - 500글자(공백제외) 하드 컷                       │
-│  - "Y for summary?" → 정돈 LLM 호출                │
-│  - Compaction: 50% 트리거, 10턴 보존               │
-├──────────────────────────────────────────────────┤
-│  Shell (실제 실행)                                 │
-│  - timeout 300초                                   │
-│  - 상태 관리는 LLM의 책임 (cd X && Y)              │
-└──────────────────────────────────────────────────┘
+tool 결과 (observations):  30.4K tokens (63%)  ← 대부분 expired/redundant
+tool_call 인자 (actions):  11.9K tokens (25%)  ← 결과에 반영된 후 오버헤드
+assistant 추론:              1.8K tokens  (4%)
+system/user:                4.4K tokens  (9%)
 ```
 
-## Design Principles
+전형적인 쓰레기 패턴:
+- `ls` 결과의 `__pycache__/`, `.git/`, `.venv/` — **useless**
+- `str_replace` 도구가 `old_str`을 action과 result에 **3중 복사** — **redundant**
+- 29개 통과한 테스트 목록 — 다음 스텝에서 **expired**
 
-1. **LLM은 이미 똑똑하다** — scaffolding을 최소화한다
-2. **도구는 shell 하나** — 오버헤드 0
-3. **시스템 프롬프트는 0줄** — 컨텍스트를 코드에 쓴다
-4. **정보 정돈 레이어** — LLM이 모르게 컨텍스트를 보호한다
-5. **Skills는 발견 기반** — 주입이 아니라 LLM이 필요할 때 읽는다
+### 3. 이 쓰레기를 제거해도 성능이 안 떨어진다 — 오히려 오른다
 
-## Shell Sanitization
+| 연구 | 방법 | 토큰 절감 | 성능 변화 |
+|------|------|----------|-----------|
+| **AgentDiet** (FSE 2026) | 2스텝 후 슬라이딩 윈도우 압축 | **40~60%** | ±2%p (통계적 무의미) |
+| **CoACT** (2026) | action-preservation 기반 observation 압축 | **33%** | **+3.5%p 상승** (57%→60.5%) |
 
-| 상황 | 동작 |
-|------|------|
-| 출력 ≤ 500글자 | 그대로 전달 |
-| 출력 > 500글자 | 500글자 컷 + "Y for summary?" |
-| `max_length=0` 지정 | truncation 없이 전체 리턴 |
-| LLM이 "Y" 응답 | 정돈 LLM 호출 → 요약본 전달 |
-| timeout (300s) | kill + "[timeout]" 리턴 |
+CoACT의 핵심 통찰: 긴 컨텍스트는 LLM 성능을 **능동적으로 저하**시킨다. 쓰레기를 빼면 agent가 더 잘한다.
 
-## Compaction
+> *CoACT: Chen et al., "Action-Preserving Observation Compression for Coding Agents", 2026 ([arxiv.org/abs/2607.02911](https://arxiv.org/abs/2607.02911))*
 
-| 항목 | 값 |
-|------|-----|
-| 트리거 | 컨텍스트 50% 도달 시 |
-| 보존 | 최근 10턴 (원본) |
-| 압축 | 나머지 전체 → 정돈 LLM |
-| 인지 | `[compacted history]` 태그 |
+### 4. LLM은 자기 컨텍스트를 못 줄인다
 
-## Skills
+AgentDiet가 LLM에게 `erase` 도구를 줬다: "17번 스텝이 불필요하면 지워라."
 
-```
-~/.inline-agent/skills/          # 유저 글로벌
-.inline-agent/skills/            # 프로젝트 로컬
-```
+**Claude 4 Sonnet도 안 지웠다.** 그냥 원래 태스크만 계속했다. LLM은 훈련 데이터에 박힌 절차를 따라가느라 맥락 정리를 하지 않는다.
 
-스킬 파일은 주입되지 않는다. 첫 메시지 시 목록만 tool result에 append되고, LLM이 필요하면 `cat`으로 읽는다.
+**결론: LLM이 모르게 외부에서 정리해야 한다.** 이것이 inline-agent의 "보이지 않는 정보 정돈 레이어"가 존재하는 이유다.
 
-## Usage
+### 5. 고가치 토큰만 남긴다
 
-```bash
-npm install
-npm run dev
-
-# OpenAI
-export OPENAI_API_KEY=sk-...
-
-# Any OpenAI-compatible provider
-export INLINE_BASE_URL=https://api.z.ai/api/paas/v4
-export INLINE_MODEL=glm-5.2
-export OPENAI_API_KEY=your-key
-```
-
-## Code
+트레이토리 토큰의 정보 가치 위계:
 
 ```
-src/
-├── index.ts     # REPL entry point
-├── loop.ts      # agent loop — one tool, zero prompt
-├── shell.ts     # shell execution + sanitization layer
-├── compact.ts   # context compaction
-└── skills.ts    # skills discovery (not injection)
+최고가치  │ 에러 메시지, 실패한 테스트, 파일 변경 사항
+          │ → 절대 보존
+고가치    │ 결과 핵심 요약, 다음 스텝과 직결되는 정보
+          │ → 보존
+중가치    │ 전체 결과 원문, action/명령어
+          │ → 압축 또는 temp file로 분리
+최저가치  │ 통과한 테스트, 디렉토리 리스팅, 빌드 로그
+          │ → 삭제
 ```
+
+## References
+
+- Xiao et al., "Reducing Cost of LLM Agents with Trajectory Reduction", FSE 2026 — 트레이토리 쓰레기 분석, 40~60% 토큰 절감, LLM 자기 정리 불가 증명
+- Chen et al., "CoACT: Action-Preserving Observation Compression for Coding Agents", 2026 — observation 압축 시 성능 유지/향상, NAP 기준
+- Pi (earendil-works), `packages/coding-agent` — temp file truncation, cut-point compaction, sanitizeBinaryOutput 참고
+- OpenCode (sst), `packages/opencode` — Retry-After 헤더 파싱, overflow 계산, truncation 힌트 참고
