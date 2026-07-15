@@ -180,6 +180,54 @@ test("Escape aborts the active loop and clears all queued prompts", async () => 
   assert.equal(output.includes("ERROR"), false);
 });
 
+test("Ctrl+C exits immediately and Ctrl+D exits when the editor is empty", () => {
+  const ctrlCTerminal = new FakeTerminal();
+  let ctrlCExits = 0;
+  const ctrlCApp = new InlineAgentApp({
+    terminal: ctrlCTerminal,
+    initialConfig: config,
+    createClient: () => ({}) as any,
+    runAgent: successfulRun,
+    onExit: () => { ctrlCExits++; },
+  });
+  ctrlCApp.start();
+  ctrlCTerminal.send("\x03");
+  assert.equal(ctrlCTerminal.stopped, true);
+  assert.equal(ctrlCExits, 1);
+
+  const ctrlDTerminal = new FakeTerminal();
+  let ctrlDExits = 0;
+  const ctrlDApp = new InlineAgentApp({
+    terminal: ctrlDTerminal,
+    initialConfig: config,
+    createClient: () => ({}) as any,
+    runAgent: successfulRun,
+    onExit: () => { ctrlDExits++; },
+  });
+  ctrlDApp.start();
+  ctrlDTerminal.send("\x04");
+  assert.equal(ctrlDTerminal.stopped, true);
+  assert.equal(ctrlDExits, 1);
+});
+
+test("Ctrl+D keeps editing when the input is not empty", () => {
+  const terminal = new FakeTerminal();
+  const app = new InlineAgentApp({
+    terminal,
+    initialConfig: config,
+    createClient: () => ({}) as any,
+    runAgent: successfulRun,
+  });
+  app.start();
+  app.chatView!.editor.setText("draft");
+
+  terminal.send("\x04");
+
+  assert.equal(terminal.stopped, false);
+  assert.equal(app.chatView!.editor.getText(), "draft");
+  app.stop();
+});
+
 test("handles settings, clear, and exit commands without sending them", async () => {
   const terminal = new FakeTerminal();
   const inputs: string[] = [];

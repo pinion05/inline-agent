@@ -80,6 +80,17 @@ export class InlineAgentApp {
 
   start(): void {
     this.removeInputListener = this.tui.addInputListener((data) => {
+      if (matchesKey(data, Key.ctrl("c"))) {
+        this.stop();
+        return { consume: true };
+      }
+      if (
+        matchesKey(data, Key.ctrl("d"))
+        && (!this.chatView || this.chatView.editor.getText().length === 0)
+      ) {
+        this.stop();
+        return { consume: true };
+      }
       if (matchesKey(data, Key.escape) && this.interrupt()) {
         return { consume: true };
       }
