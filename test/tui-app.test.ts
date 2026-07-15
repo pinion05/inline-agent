@@ -13,7 +13,11 @@ class FakeTerminal implements Terminal {
   started = false;
   stopped = false;
   writes: string[] = [];
-  start(): void { this.started = true; }
+  private onInput?: (data: string) => void;
+  start(onInput: (data: string) => void): void {
+    this.started = true;
+    this.onInput = onInput;
+  }
   stop(): void { this.stopped = true; }
   drainInput(): Promise<void> { return Promise.resolve(); }
   write(data: string): void { this.writes.push(data); }
@@ -25,6 +29,7 @@ class FakeTerminal implements Terminal {
   clearScreen(): void {}
   setTitle(): void {}
   setProgress(): void {}
+  send(data: string): void { this.onInput?.(data); }
 }
 
 const config: AgentConfig = {
@@ -134,6 +139,45 @@ test("queues prompts in FIFO order while a run is active", async () => {
     "first", "second", "third",
   ]);
   assert.equal(app.queueLength, 0);
+});
+
+test("Escape aborts the active loop and clears all queued prompts", async () => {
+  const terminal = new FakeTerminal();
+  const starts: string[] = [];
+  const signals: AbortSignal[] = [];
+  const app = new InlineAgentApp({
+    terminal,
+    initialConfig: config,
+    createClient: () => ({}) as any,
+    runAgent: async (opts, input) => {
+      starts.push(input);
+      if (opts.signal) signals.push(opts.signal);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("not interrupted")), 300);
+        opts.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          opts.onEvent?.({ type: "interrupted" });
+          reject(opts.signal?.reason);
+        }, { once: true });
+      });
+      return "unreachable";
+    },
+  });
+  app.start();
+
+  const processing = app.submit("first");
+  void app.submit("second");
+  void app.submit("third");
+  await tick();
+  terminal.send("\x1b");
+  await processing;
+
+  assert.deepEqual(starts, ["first"]);
+  assert.equal(signals[0]?.aborted, true);
+  assert.equal(app.queueLength, 0);
+  const output = stripAnsi(app.chatView!.render(80).join("\n"));
+  assert.match(output, /INTERRUPTED/);
+  assert.equal(output.includes("ERROR"), false);
 });
 
 test("handles settings, clear, and exit commands without sending them", async () => {

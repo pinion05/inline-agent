@@ -17,7 +17,7 @@ export interface ChatViewOptions {
   onSubmit?: (text: string) => void;
 }
 
-type RunStatus = "ready" | "running" | "error";
+type RunStatus = "ready" | "running" | "interrupting" | "error";
 
 export class ChatView implements Component {
   readonly editor: Editor;
@@ -73,6 +73,18 @@ export class ChatView implements Component {
     this.addTranscript(new MessageBlock("ERROR", message, "error"));
     this.status = "error";
     this.updateChrome();
+  }
+
+  addInterrupted(cancelledQueueCount = 0): void {
+    for (const tool of this.tools.values()) tool.interrupt();
+    const queueDetail = cancelledQueueCount > 0
+      ? ` · queued ${cancelledQueueCount} cancelled`
+      : "";
+    this.addTranscript(new MessageBlock(
+      "INTERRUPTED",
+      `agent loop stopped${queueDetail}`,
+      "tool",
+    ));
   }
 
   addCompression(before: number, after: number, eliminatedTokens: number): void {
@@ -149,7 +161,7 @@ export class ChatView implements Component {
       : "—";
     const statusColor = this.status === "error"
       ? tuiTheme.error
-      : this.status === "running"
+      : this.status === "running" || this.status === "interrupting"
         ? tuiTheme.warning
         : tuiTheme.success;
     this.footer.setText(
@@ -206,6 +218,7 @@ class ToolBlock implements Component {
   private readonly command: string;
   private output = "";
   private exitCode: number | null = null;
+  private interrupted = false;
   private box = new Box(1, 0, tuiTheme.toolBg);
 
   constructor(name: string, command: string) {
@@ -220,17 +233,32 @@ class ToolBlock implements Component {
     this.rebuild();
   }
 
+  interrupt(): void {
+    if (this.exitCode !== null) return;
+    this.interrupted = true;
+    this.output = "[interrupted by user]";
+    this.rebuild();
+  }
+
   render(width: number): string[] { return this.box.render(width); }
   invalidate(): void { this.box.invalidate(); }
 
   private rebuild(): void {
     this.box = new Box(1, 0, tuiTheme.toolBg);
-    const icon = this.exitCode === null ? "…" : this.exitCode === 0 ? "✓" : "✗";
-    const color = this.exitCode === null
+    const icon = this.interrupted
+      ? "■"
+      : this.exitCode === null
+        ? "…"
+        : this.exitCode === 0
+          ? "✓"
+          : "✗";
+    const color = this.interrupted
       ? tuiTheme.warning
-      : this.exitCode === 0
-        ? tuiTheme.success
-        : tuiTheme.error;
+      : this.exitCode === null
+        ? tuiTheme.warning
+        : this.exitCode === 0
+          ? tuiTheme.success
+          : tuiTheme.error;
     this.box.addChild(new Text(
       tuiTheme.bold(color(`TOOL ${this.name} ${icon}`)),
       0,

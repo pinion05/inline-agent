@@ -1,6 +1,8 @@
 import {
+  Key,
   ProcessTerminal,
   TUI,
+  matchesKey,
   type OverlayHandle,
   type Terminal,
 } from "@earendil-works/pi-tui";
@@ -57,6 +59,9 @@ export class InlineAgentApp {
   private firstRunSettings = false;
   private skillsInjected = false;
   private lastUsage?: UsageInfo;
+  private currentAbort?: AbortController;
+  private cancelledQueueCount = 0;
+  private removeInputListener?: () => void;
   private stopped = false;
 
   constructor(options: InlineAgentAppOptions = {}) {
@@ -74,6 +79,12 @@ export class InlineAgentApp {
   get queueLength(): number { return this.queue.length; }
 
   start(): void {
+    this.removeInputListener = this.tui.addInputListener((data) => {
+      if (matchesKey(data, Key.escape) && this.interrupt()) {
+        return { consume: true };
+      }
+      return undefined;
+    });
     if (this.config) {
       this.activateChat(this.config);
     } else {
@@ -123,6 +134,16 @@ export class InlineAgentApp {
     return this.processing;
   }
 
+  interrupt(): boolean {
+    if (!this.currentAbort || this.currentAbort.signal.aborted) return false;
+    this.cancelledQueueCount = this.queue.length;
+    this.queue.length = 0;
+    this.chatView?.setStatus("interrupting", 0, estimateTokens(this.messages));
+    this.currentAbort.abort();
+    this.tui.requestRender();
+    return true;
+  }
+
   async applyConfig(config: AgentConfig): Promise<void> {
     const client = this.createClientImpl(config);
     await this.saveConfigImpl(config);
@@ -155,6 +176,10 @@ export class InlineAgentApp {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.queue.length = 0;
+    this.currentAbort?.abort();
+    this.removeInputListener?.();
+    this.removeInputListener = undefined;
     this.settingsView?.dispose();
     this.tui.stop();
     this.onExit?.();
@@ -221,7 +246,9 @@ export class InlineAgentApp {
       const client = this.client;
       if (!config || !client || !this.chatView) return;
       this.chatView.setStatus("running", this.queue.length, estimateTokens(this.messages));
-      let errorEventSeen = false;
+      let terminalEventSeen = false;
+      const abortController = new AbortController();
+      this.currentAbort = abortController;
       const runOptions: RunOptions = {
         client,
         model: config.model,
@@ -230,8 +257,11 @@ export class InlineAgentApp {
         messages: this.messages,
         skillsInjected: this.skillsInjected,
         lastUsage: this.lastUsage,
+        signal: abortController.signal,
         onEvent: (event) => {
-          if (event.type === "error") errorEventSeen = true;
+          if (event.type === "error" || event.type === "interrupted") {
+            terminalEventSeen = true;
+          }
           this.handleAgentEvent(event, config.apiKey);
         },
       };
@@ -239,11 +269,17 @@ export class InlineAgentApp {
       try {
         await this.runAgentImpl(runOptions, input);
       } catch (error) {
-        if (!errorEventSeen) {
+        if (abortController.signal.aborted) {
+          if (!terminalEventSeen) {
+            this.chatView.addInterrupted(this.cancelledQueueCount);
+          }
+        } else if (!terminalEventSeen) {
           const message = error instanceof Error ? error.message : String(error);
           this.chatView.addError(redact(message, config.apiKey));
         }
       } finally {
+        if (this.currentAbort === abortController) this.currentAbort = undefined;
+        this.cancelledQueueCount = 0;
         this.skillsInjected = runOptions.skillsInjected ?? this.skillsInjected;
         this.lastUsage = runOptions.lastUsage;
       }
@@ -273,6 +309,10 @@ export class InlineAgentApp {
         return;
       case "assistant-complete":
         chat.addAssistant(event.content);
+        return;
+      case "interrupted":
+        chat.addInterrupted(this.cancelledQueueCount);
+        this.cancelledQueueCount = 0;
         return;
       case "error":
         chat.addError(redact(event.message, apiKey));

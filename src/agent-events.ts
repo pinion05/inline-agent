@@ -18,6 +18,7 @@ export type AgentEvent =
       eliminatedTokens: number;
     }
   | { type: "assistant-complete"; content: string }
+  | { type: "interrupted" }
   | { type: "error"; message: string };
 
 export type AgentEventHandler = (event: AgentEvent) => void;

@@ -6,7 +6,7 @@ Replace the TTY readline interface with a Pi-style inline retained-mode TUI and 
 
 ## Scope
 
-This phase provides the retained TUI foundation, configuration workflow, multiline editor, transcript, structured agent/tool events, FIFO prompt queue, and live runtime configuration changes. Assistant token streaming and run cancellation remain outside this phase.
+This phase provides the retained TUI foundation, configuration workflow, multiline editor, transcript, structured agent/tool events, FIFO prompt queue, live runtime configuration changes, and Escape-driven cancellation. Assistant token streaming remains outside this phase.
 
 Non-TTY execution retains a line-oriented fallback. The alternate screen buffer is not used, preserving terminal scrollback, selection, search, and tmux copy mode.
 
@@ -69,7 +69,7 @@ The implementation uses `@earendil-works/pi-tui` on Node.js 22.19 or later.
 
 The base TUI hierarchy is header, transcript, editor, and footer. User, tool, and assistant blocks keep their existing calm dark backgrounds. The footer shows provider, model, reasoning effort, run state, queue length, and context usage. Narrow terminals drop secondary labels before truncating primary state.
 
-`Enter` submits and `Ctrl+J` or `Shift+Enter` inserts a newline. `/settings`, `/clear`, `/exit`, and `/quit` are handled locally. Prompts submitted while the engine is running enter a FIFO queue and execute in order.
+`Enter` submits and `Ctrl+J` or `Shift+Enter` inserts a newline. `/settings`, `/clear`, `/exit`, and `/quit` are handled locally. Prompts submitted while the engine is running enter a FIFO queue and execute in order. `Escape` aborts the active provider request or shell process, clears every queued prompt, records valid interrupted tool results in the trajectory, and returns focus to the editor without rendering an error.
 
 ## Agent Events and Dashboard
 

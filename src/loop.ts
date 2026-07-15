@@ -58,6 +58,7 @@ export interface RunOptions {
   skillsInjected?: boolean;
   lastUsage?: UsageInfo;
   systemPromptLoader?: () => Promise<string | undefined>;
+  signal?: AbortSignal;
   onEvent?: AgentEventHandler;
 }
 
@@ -66,6 +67,11 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
   try {
     return await executeRun(opts, userInput);
   } catch (error) {
+    if (isInterrupted(error, opts.signal)) {
+      updateContext(opts.messages, opts.contextWindow, "interrupted");
+      emit(opts, { type: "interrupted" });
+      throw error;
+    }
     const message = error instanceof Error ? error.message : String(error);
     updateContext(opts.messages, opts.contextWindow, `error: ${message}`);
     emit(opts, { type: "error", message });
@@ -75,6 +81,7 @@ export async function run(opts: RunOptions, userInput: string): Promise<string> 
 
 async function executeRun(opts: RunOptions, userInput: string): Promise<string> {
   const { client, model, reasoningEffort, contextWindow, messages } = opts;
+  opts.signal?.throwIfAborted();
 
   // First message: inject skills list into user input (not system prompt).
   let effectiveInput = userInput;
@@ -94,8 +101,10 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
 
   const systemPromptLoader = opts.systemPromptLoader ?? loadSystemPrompt;
   for (let i = 0; i < MAX_ITERATIONS; i++) {
+    opts.signal?.throwIfAborted();
     updateContext(messages, contextWindow, `LLM call #${i + 1}...`);
     const systemPrompt = await systemPromptLoader();
+    opts.signal?.throwIfAborted();
     const apiMessages = prependSystemPrompt(messages, systemPrompt);
     const request = {
       model,
@@ -108,7 +117,10 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
       reasoningEffort,
     });
 
-    const response = await client.chat.completions.create(request);
+    const response = await client.chat.completions.create(request, {
+      signal: opts.signal,
+    });
+    opts.signal?.throwIfAborted();
 
     const msg = response.choices[0].message;
 
@@ -152,7 +164,9 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
     }
 
     // Execute tool calls.
-    for (const tc of msg.tool_calls) {
+    for (let toolIndex = 0; toolIndex < msg.tool_calls.length; toolIndex++) {
+      opts.signal?.throwIfAborted();
+      const tc = msg.tool_calls[toolIndex];
       const args = JSON.parse(tc.function.arguments);
       const command: string = args.command;
       const maxLength: number | undefined = args.max_length;
@@ -165,7 +179,25 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
       });
       updateContext(messages, contextWindow, `$ ${command}`);
 
-      const result = await runShell(command, { maxLength });
+      let result;
+      try {
+        result = await runShell(command, {
+          maxLength,
+          signal: opts.signal,
+        });
+      } catch (error) {
+        if (isInterrupted(error, opts.signal)) {
+          for (const pending of msg.tool_calls.slice(toolIndex)) {
+            messages.push({
+              role: "tool",
+              tool_call_id: pending.id,
+              content: "[interrupted by user]",
+            });
+          }
+          updateContext(messages, contextWindow, "tool interrupted");
+        }
+        throw error;
+      }
       recordEliminatedTokens(result.eliminatedTokens);
       emit(opts, {
         type: "tool-complete",
@@ -221,4 +253,10 @@ function maybeCompress(opts: RunOptions): void {
 
 function emit(opts: RunOptions, event: AgentEvent): void {
   opts.onEvent?.(event);
+}
+
+function isInterrupted(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  const candidate = error as { name?: unknown; code?: unknown };
+  return candidate?.name === "AbortError" || candidate?.code === "ABORT_ERR";
 }

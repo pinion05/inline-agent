@@ -124,6 +124,7 @@ reasoning은 Auto 없이 provider 원본 값을 명시적으로 전송한다.
 
 - `Enter`: 전송
 - `Ctrl+J` 또는 `Shift+Enter`: 개행
+- `Esc`: 실행 중인 LLM 요청·shell 명령과 FIFO 대기열 전체 중단
 - `/settings`: provider/model/reasoning 설정
 - `/clear`: 대화 초기화
 - `/exit`, `/quit`: 종료

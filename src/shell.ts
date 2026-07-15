@@ -83,8 +83,9 @@ function truncateTail(output: string, maxNonWs: number): { text: string; total: 
 
 export async function runShell(
   command: string,
-  options?: { maxLength?: number; timeout?: number }
+  options?: { maxLength?: number; timeout?: number; signal?: AbortSignal }
 ): Promise<ShellResult> {
+  options?.signal?.throwIfAborted();
   const timeout = options?.timeout ?? DEFAULT_TIMEOUT;
   const noLimit = options?.maxLength === 0;
 
@@ -98,10 +99,14 @@ export async function runShell(
       maxBuffer: 10 * 1024 * 1024,
       shell: "/bin/sh",
       env: { ...process.env, PS1: "", PS2: "" },
+      signal: options?.signal,
     });
     stdout = out;
     stderr = err;
   } catch (e: any) {
+    if (options?.signal?.aborted || e?.name === "AbortError" || e?.code === "ABORT_ERR") {
+      throw options?.signal?.reason ?? e;
+    }
     stdout = e.stdout ?? "";
     stderr = e.stderr ?? "";
     exitCode = e.code ?? 1;
