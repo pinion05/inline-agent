@@ -605,7 +605,7 @@ export class SettingsView implements Component, Focusable {
       }
       case "max-tool-calls":
         return this.selector(
-          "한 assistant 응답의 최대 shell tool call 수를 선택하세요",
+          "에이전트가 한번에 병렬호출 할 수 있는 명령갯수 제한",
           [1, 2, 3, 5, 10, 20, 50, 100]
             .map((value) => ({
               value: String(value),
