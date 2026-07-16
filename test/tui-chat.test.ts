@@ -40,6 +40,7 @@ const config: AgentConfig = {
   reasoningEffort: "high",
   recentRawToolActions: 3,
   toolOutputSafetyLimit: 65_536,
+  maxToolCallsPerResponse: 1,
 };
 
 test("renders width-safe retained user, tool, assistant, and error blocks", () => {

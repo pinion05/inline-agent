@@ -35,6 +35,7 @@ const existing: AgentConfig = {
   reasoningEffort: "high",
   recentRawToolActions: 3,
   toolOutputSafetyLimit: 65_536,
+  maxToolCallsPerResponse: 1,
 };
 
 function controllerWith(
@@ -83,6 +84,7 @@ test("completes provider, auth, model, reasoning, and confirmation steps", async
     reasoningEffort: "max",
     recentRawToolActions: 5,
     toolOutputSafetyLimit: 262_144,
+    maxToolCallsPerResponse: 1,
   }]);
   assert.equal(controller.state.step, "done");
 });

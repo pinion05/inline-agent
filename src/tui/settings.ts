@@ -17,6 +17,7 @@ import {
 } from "@earendil-works/pi-tui";
 
 import {
+  DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
   DEFAULT_RECENT_RAW_TOOL_ACTIONS,
   DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
   MAX_RECENT_RAW_TOOL_ACTIONS,
@@ -68,6 +69,7 @@ export interface SettingsDraft {
   reasoningEffort: ReasoningEffort;
   recentRawToolActions: number;
   toolOutputSafetyLimit: number;
+  maxToolCallsPerResponse: number;
 }
 
 interface SettingsControllerOptions {
@@ -107,6 +109,8 @@ export class SettingsController {
         ?? DEFAULT_RECENT_RAW_TOOL_ACTIONS,
       toolOutputSafetyLimit: source.toolOutputSafetyLimit
         ?? DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
+      maxToolCallsPerResponse: source.maxToolCallsPerResponse
+        ?? DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
     };
   }
 
@@ -349,6 +353,7 @@ export class SettingsController {
       reasoningEffort: this.draft.reasoningEffort,
       recentRawToolActions: this.draft.recentRawToolActions,
       toolOutputSafetyLimit: this.draft.toolOutputSafetyLimit,
+      maxToolCallsPerResponse: this.draft.maxToolCallsPerResponse,
     };
   }
 

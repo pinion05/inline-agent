@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 
 import {
   CONFIG_FILE,
+  DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
   DEFAULT_RECENT_RAW_TOOL_ACTIONS,
   DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
   environmentConfigSeed,
@@ -25,6 +26,7 @@ const validConfig: AgentConfig = {
   reasoningEffort: "high",
   recentRawToolActions: 3,
   toolOutputSafetyLimit: 65_536,
+  maxToolCallsPerResponse: 1,
 };
 
 async function tempConfigPath(t: test.TestContext): Promise<string> {
@@ -82,10 +84,15 @@ test("reports missing and corrupt configs without rewriting them", async (t) => 
   assert.equal(await import("node:fs/promises").then(({ readFile }) => readFile(path, "utf8")), corrupt);
 });
 
-test("fills retention defaults when an existing v1 config omits them", async (t) => {
+test("fills runtime defaults when an existing v1 config omits them", async (t) => {
   const path = await tempConfigPath(t);
   await mkdir(dirname(path), { recursive: true });
-  const { recentRawToolActions, toolOutputSafetyLimit, ...legacy } = validConfig;
+  const {
+    recentRawToolActions,
+    toolOutputSafetyLimit,
+    maxToolCallsPerResponse,
+    ...legacy
+  } = validConfig;
   await writeFile(path, JSON.stringify(legacy));
 
   const result = await loadConfig(path);
@@ -94,6 +101,10 @@ test("fills retention defaults when an existing v1 config omits them", async (t)
   if (result.status === "valid") {
     assert.equal(result.config.recentRawToolActions, DEFAULT_RECENT_RAW_TOOL_ACTIONS);
     assert.equal(result.config.toolOutputSafetyLimit, DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT);
+    assert.equal(
+      result.config.maxToolCallsPerResponse,
+      DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
+    );
   }
 });
 
@@ -105,10 +116,26 @@ test("rejects invalid retention ranges", async (t) => {
     { recentRawToolActions: 21 },
     { toolOutputSafetyLimit: 4095 },
     { toolOutputSafetyLimit: 1_048_577 },
+    { maxToolCallsPerResponse: 0 },
+    { maxToolCallsPerResponse: 101 },
+    { maxToolCallsPerResponse: 1.5 },
+    { maxToolCallsPerResponse: "2" },
   ]) {
     await writeFile(path, JSON.stringify({ ...validConfig, ...invalid }));
     const result = await loadConfig(path);
     assert.equal(result.status, "invalid");
+  }
+});
+
+test("accepts maximum tool-call boundaries", async (t) => {
+  const path = await tempConfigPath(t);
+  for (const maxToolCallsPerResponse of [1, 100]) {
+    await saveConfig({ ...validConfig, maxToolCallsPerResponse }, path);
+    const result = await loadConfig(path);
+    assert.equal(result.status, "valid");
+    if (result.status === "valid") {
+      assert.equal(result.config.maxToolCallsPerResponse, maxToolCallsPerResponse);
+    }
   }
 });
 
@@ -161,6 +188,7 @@ test("builds first-run seeds from existing environment variables", () => {
     reasoningEffort: "high",
     recentRawToolActions: 3,
     toolOutputSafetyLimit: 65_536,
+    maxToolCallsPerResponse: 1,
   });
   assert.deepEqual(environmentConfigSeed({ OPENAI_API_KEY: "o-key" }), {
     provider: "openai",
@@ -169,6 +197,7 @@ test("builds first-run seeds from existing environment variables", () => {
     reasoningEffort: "high",
     recentRawToolActions: 3,
     toolOutputSafetyLimit: 65_536,
+    maxToolCallsPerResponse: 1,
   });
   assert.deepEqual(environmentConfigSeed({
     INLINE_BASE_URL: "https://example.test/v1",
@@ -182,5 +211,6 @@ test("builds first-run seeds from existing environment variables", () => {
     reasoningEffort: "high",
     recentRawToolActions: 3,
     toolOutputSafetyLimit: 65_536,
+    maxToolCallsPerResponse: 1,
   });
 });

@@ -19,6 +19,9 @@ export const MAX_RECENT_RAW_TOOL_ACTIONS = 20;
 export const DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT = 64 * 1024;
 export const MIN_TOOL_OUTPUT_SAFETY_LIMIT = 4 * 1024;
 export const MAX_TOOL_OUTPUT_SAFETY_LIMIT = 1024 * 1024;
+export const DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE = 1;
+export const MIN_MAX_TOOL_CALLS_PER_RESPONSE = 1;
+export const MAX_MAX_TOOL_CALLS_PER_RESPONSE = 100;
 
 export interface AgentConfig {
   version: 1;
@@ -29,6 +32,7 @@ export interface AgentConfig {
   reasoningEffort: ReasoningEffort;
   recentRawToolActions: number;
   toolOutputSafetyLimit: number;
+  maxToolCallsPerResponse: number;
 }
 
 export type ConfigLoadResult =
@@ -132,6 +136,7 @@ export function environmentConfigSeed(
   const retention = {
     recentRawToolActions: DEFAULT_RECENT_RAW_TOOL_ACTIONS,
     toolOutputSafetyLimit: DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
+    maxToolCallsPerResponse: DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
   };
   if (env.INLINE_BASE_URL) {
     return {
@@ -211,6 +216,19 @@ function parseConfig(value: unknown): AgentConfig {
     );
   }
 
+  const maxToolCallsPerResponse = value.maxToolCallsPerResponse
+    ?? DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE;
+  if (
+    typeof maxToolCallsPerResponse !== "number"
+    || !Number.isInteger(maxToolCallsPerResponse)
+    || maxToolCallsPerResponse < MIN_MAX_TOOL_CALLS_PER_RESPONSE
+    || maxToolCallsPerResponse > MAX_MAX_TOOL_CALLS_PER_RESPONSE
+  ) {
+    throw new Error(
+      `maxToolCallsPerResponse must be an integer from ${MIN_MAX_TOOL_CALLS_PER_RESPONSE} to ${MAX_MAX_TOOL_CALLS_PER_RESPONSE}`,
+    );
+  }
+
   let baseURL: string | undefined;
   if (value.provider === "custom") {
     if (typeof value.baseURL !== "string" || value.baseURL.length === 0) {
@@ -232,6 +250,7 @@ function parseConfig(value: unknown): AgentConfig {
     reasoningEffort: value.reasoningEffort as ReasoningEffort,
     recentRawToolActions,
     toolOutputSafetyLimit,
+    maxToolCallsPerResponse,
   };
 }
 

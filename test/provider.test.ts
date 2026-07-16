@@ -17,6 +17,7 @@ const baseConfig: AgentConfig = {
   reasoningEffort: "high",
   recentRawToolActions: 3,
   toolOutputSafetyLimit: 65_536,
+  maxToolCallsPerResponse: 1,
 };
 
 test("describes provider endpoints, defaults, and exact reasoning values", () => {

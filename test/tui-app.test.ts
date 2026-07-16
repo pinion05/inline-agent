@@ -40,6 +40,7 @@ const config: AgentConfig = {
   reasoningEffort: "high",
   recentRawToolActions: 3,
   toolOutputSafetyLimit: 65_536,
+  maxToolCallsPerResponse: 1,
 };
 
 const successfulRun = async (opts: RunOptions, input: string) => {
@@ -99,6 +100,7 @@ test("opens first-run settings and activates chat after secure save", async () =
     reasoningEffort: "high",
     recentRawToolActions: 3,
     toolOutputSafetyLimit: 65_536,
+    maxToolCallsPerResponse: 1,
   }]);
   assert.equal(app.config?.apiKey, "first-key");
   assert.ok(app.chatView);

@@ -9,6 +9,7 @@ import * as readline from "node:readline";
 
 import type { AgentEvent } from "./agent-events.js";
 import {
+  DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
   DEFAULT_RECENT_RAW_TOOL_ACTIONS,
   DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
   environmentConfigSeed,
@@ -85,6 +86,8 @@ function configForLineMode(
         ?? DEFAULT_RECENT_RAW_TOOL_ACTIONS,
       toolOutputSafetyLimit: seed.toolOutputSafetyLimit
         ?? DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
+      maxToolCallsPerResponse: seed.maxToolCallsPerResponse
+        ?? DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
     };
   }
   return loaded.status === "valid" ? loaded.config : undefined;
