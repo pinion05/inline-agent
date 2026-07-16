@@ -5,6 +5,7 @@ import type { AgentEvent } from "../src/agent-events.js";
 import { run } from "../src/loop.js";
 import { getSnapshot } from "../src/server.js";
 import type { Message } from "../src/compact.js";
+import { RUNTIME_TOOL_POLICY_PREFIX } from "../src/runtime-tool-policy.js";
 import { countRawToolActions } from "../src/trajectory.js";
 
 test("captures the exact request-only system prompt, messages, and tools", async () => {
@@ -39,6 +40,7 @@ test("captures the exact request-only system prompt, messages, and tools", async
       reasoningEffort: "high",
       recentRawToolActions: 3,
       toolOutputSafetyLimit: 65_536,
+      maxToolCallsPerResponse: 1,
       contextWindow: 100_000,
       messages,
       skillsInjected: true,
@@ -67,6 +69,10 @@ test("captures the exact request-only system prompt, messages, and tools", async
   );
   assert.deepEqual(sentMessages, [
     { role: "system", content: "exact system prompt\n" },
+    {
+      role: "system",
+      content: `${RUNTIME_TOOL_POLICY_PREFIX}\nIn this assistant response, emit at most 1 shell tool calls.\nIf more work is needed, wait for the tool results and continue in the next response.`,
+    },
     { role: "user", content: "exact user input" },
   ]);
   assert.deepEqual(messages, [
@@ -126,6 +132,7 @@ test("reloads the system prompt before every tool-loop API call", async () => {
       reasoningEffort: "low",
       recentRawToolActions: 3,
       toolOutputSafetyLimit: 65_536,
+      maxToolCallsPerResponse: 1,
       contextWindow: 100_000,
       messages,
       skillsInjected: true,
@@ -148,6 +155,66 @@ test("reloads the system prompt before every tool-loop API call", async () => {
   assert.equal(messages.some((message) => message.role === "system"), false);
   assert.deepEqual(getSnapshot().apiMessages, sentRequests[1]);
   assert.equal(getSnapshot().apiReasoningEffort, "low");
+});
+
+test("reloads the maximum tool-call policy inside one active loop", async () => {
+  const requests: Message[][] = [];
+  let currentMaximum = 1;
+  const client = {
+    chat: {
+      completions: {
+        create: async (request: { messages: Message[] }) => {
+          requests.push(structuredClone(request.messages));
+          if (requests.length === 1) {
+            currentMaximum = 7;
+            return {
+              choices: [{
+                message: {
+                  content: "",
+                  tool_calls: [{
+                    id: "call_live",
+                    type: "function",
+                    function: {
+                      name: "shell",
+                      arguments: JSON.stringify({ command: "printf live" }),
+                    },
+                  }],
+                },
+              }],
+            };
+          }
+          return { choices: [{ message: { content: "done", tool_calls: [] } }] };
+        },
+      },
+    },
+  };
+  const messages: Message[] = [];
+
+  await run({
+    client: client as any,
+    model: "test-model",
+    reasoningEffort: "high",
+    recentRawToolActions: 3,
+    toolOutputSafetyLimit: 65_536,
+    maxToolCallsPerResponse: 1,
+    maxToolCallsPerResponseLoader: () => currentMaximum,
+    contextWindow: 100_000,
+    messages,
+    skillsInjected: true,
+    systemPromptLoader: async () => undefined,
+  }, "live policy");
+
+  const policies = requests.map((request) => request.filter((message) => (
+    message.content.startsWith(RUNTIME_TOOL_POLICY_PREFIX)
+  )));
+  assert.equal(policies[0].length, 1);
+  assert.match(policies[0][0].content, /at most 1 shell tool calls/);
+  assert.equal(policies[1].length, 1);
+  assert.match(policies[1][0].content, /at most 7 shell tool calls/);
+  assert.equal(messages.some((message) => (
+    message.content.startsWith(RUNTIME_TOOL_POLICY_PREFIX)
+  )), false);
+  assert.deepEqual(getSnapshot().apiMessages, requests[1]);
 });
 
 test("sends a request-only projection while retaining the canonical raw ring", async () => {
@@ -188,6 +255,7 @@ test("sends a request-only projection while retaining the canonical raw ring", a
     reasoningEffort: "high",
     recentRawToolActions: 1,
     toolOutputSafetyLimit: 65_536,
+    maxToolCallsPerResponse: 1,
     contextWindow: 100_000,
     messages,
     skillsInjected: true,

@@ -276,6 +276,11 @@ export class InlineAgentApp {
         reasoningEffort: config.reasoningEffort,
         recentRawToolActions: config.recentRawToolActions,
         toolOutputSafetyLimit: config.toolOutputSafetyLimit,
+        maxToolCallsPerResponse: config.maxToolCallsPerResponse,
+        maxToolCallsPerResponseLoader: () => (
+          this.config?.maxToolCallsPerResponse
+          ?? config.maxToolCallsPerResponse
+        ),
         contextWindow: this.contextWindow,
         messages: this.messages,
         skillsInjected: this.skillsInjected,

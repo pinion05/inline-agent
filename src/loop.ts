@@ -10,6 +10,7 @@ import type OpenAI from "openai";
 import { runShell } from "./shell.js";
 import type { Message, UsageInfo } from "./compact.js";
 import {
+  DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
   DEFAULT_RECENT_RAW_TOOL_ACTIONS,
   DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
   type ReasoningEffort,
@@ -54,6 +55,8 @@ export interface RunOptions {
   reasoningEffort: ReasoningEffort;
   recentRawToolActions: number;
   toolOutputSafetyLimit: number;
+  maxToolCallsPerResponse: number;
+  maxToolCallsPerResponseLoader?: () => number;
   contextWindow: number;
   messages: Message[];
   skillsInjected?: boolean;
@@ -107,11 +110,15 @@ async function executeRun(opts: RunOptions, userInput: string): Promise<string> 
     opts.signal?.throwIfAborted();
     const configuredRawActions = opts.recentRawToolActions
       ?? DEFAULT_RECENT_RAW_TOOL_ACTIONS;
+    const maxToolCallsPerResponse = opts.maxToolCallsPerResponseLoader?.()
+      ?? opts.maxToolCallsPerResponse
+      ?? DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE;
     const projection = buildContextProjection({
       messages,
       systemPrompt,
       tools: [SHELL_TOOL],
       configuredRawActions,
+      maxToolCallsPerResponse,
       maxInputTokens: Math.max(0, contextWindow - 16_384),
     });
     const request = {

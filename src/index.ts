@@ -117,6 +117,7 @@ async function startLineMode(config: AgentConfig): Promise<void> {
     reasoningEffort: config.reasoningEffort,
     recentRawToolActions: config.recentRawToolActions,
     toolOutputSafetyLimit: config.toolOutputSafetyLimit,
+    maxToolCallsPerResponse: config.maxToolCallsPerResponse,
     contextWindow,
     messages,
     skillsInjected: false,

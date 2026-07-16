@@ -12,6 +12,10 @@ import {
   buildContextProjection,
   estimateRequestTokens,
 } from "../src/context-projection.js";
+import {
+  MissingUserAnchorError,
+  RUNTIME_TOOL_POLICY_PREFIX,
+} from "../src/runtime-tool-policy.js";
 
 function actionHistory(groups: number, outputSize = 200): Message[] {
   const messages: Message[] = [{ role: "user", content: "do the work" }];
@@ -115,6 +119,7 @@ test("context projection lowers effective raw actions until the request fits", (
     systemPrompt: "system",
     tools: [{ type: "function", function: { name: "shell" } }],
     configuredRawActions: 3,
+    maxToolCallsPerResponse: 1,
     maxInputTokens: 1_800,
   });
 
@@ -124,6 +129,74 @@ test("context projection lowers effective raw actions until the request fits", (
   assert.ok(result.estimatedTokens <= 1_800);
   assert.ok(result.compressionTokens > 0);
   assert.equal(countRawToolActions(result.apiMessages), result.effectiveRawActions);
+});
+
+test("inserts one immutable runtime policy before the newest user", () => {
+  const canonical: Message[] = [
+    { role: "user", content: "old" },
+    { role: "assistant", content: "answer" },
+    { role: "user", content: "new" },
+  ];
+  const original = structuredClone(canonical);
+
+  const first = buildContextProjection({
+    messages: canonical,
+    systemPrompt: "home system",
+    tools: [],
+    configuredRawActions: 3,
+    maxToolCallsPerResponse: 5,
+    maxInputTokens: 10_000,
+  });
+  const second = buildContextProjection({
+    messages: canonical,
+    systemPrompt: "home system",
+    tools: [],
+    configuredRawActions: 3,
+    maxToolCallsPerResponse: 7,
+    maxInputTokens: 10_000,
+  });
+
+  assert.deepEqual(first.apiMessages, [
+    { role: "system", content: "home system" },
+    { role: "user", content: "old" },
+    { role: "assistant", content: "answer" },
+    {
+      role: "system",
+      content: `${RUNTIME_TOOL_POLICY_PREFIX}\nIn this assistant response, emit at most 5 shell tool calls.\nIf more work is needed, wait for the tool results and continue in the next response.`,
+    },
+    { role: "user", content: "new" },
+  ]);
+  assert.equal(
+    first.apiMessages.filter((message) => (
+      message.content.startsWith(RUNTIME_TOOL_POLICY_PREFIX)
+    )).length,
+    1,
+  );
+  assert.match(
+    second.apiMessages.at(-2)?.content ?? "",
+    /at most 7 shell tool calls/,
+  );
+  assert.deepEqual(canonical, original);
+  assert.ok(
+    first.estimatedTokens > estimateRequestTokens(
+      [{ role: "system", content: "home system" }, ...canonical],
+      [],
+    ),
+  );
+});
+
+test("rejects a request projection without a user anchor", () => {
+  assert.throws(
+    () => buildContextProjection({
+      messages: [{ role: "assistant", content: "orphan" }],
+      systemPrompt: undefined,
+      tools: [],
+      configuredRawActions: 3,
+      maxToolCallsPerResponse: 1,
+      maxInputTokens: 10_000,
+    }),
+    MissingUserAnchorError,
+  );
 });
 
 test("uses the dashboard's exact request-token estimate", () => {
@@ -155,6 +228,7 @@ test("throws before the provider call when zero raw actions still cannot fit", (
       systemPrompt: "system",
       tools: [],
       configuredRawActions: 3,
+      maxToolCallsPerResponse: 1,
       maxInputTokens: 100,
     }),
     (error: Error) => (

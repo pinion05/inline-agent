@@ -1,4 +1,5 @@
 import type { Message } from "./compact.js";
+import { insertRuntimeToolPolicy } from "./runtime-tool-policy.js";
 import { prependSystemPrompt } from "./system-prompt.js";
 import { projectTrajectory } from "./trajectory.js";
 
@@ -7,6 +8,7 @@ export interface ContextProjectionOptions {
   systemPrompt: string | undefined;
   tools: unknown[];
   configuredRawActions: number;
+  maxToolCallsPerResponse: number;
   maxInputTokens: number;
 }
 
@@ -38,15 +40,22 @@ export function buildContextProjection(
     systemPrompt,
     tools,
     configuredRawActions,
+    maxToolCallsPerResponse,
     maxInputTokens,
   } = options;
-  const fullMessages = prependSystemPrompt(messages, systemPrompt);
+  const fullMessages = prependSystemPrompt(
+    insertRuntimeToolPolicy(messages, maxToolCallsPerResponse),
+    systemPrompt,
+  );
   const fullTokens = estimateRequestTokens(fullMessages, tools);
   let smallestEstimate = fullTokens;
 
   for (let keep = configuredRawActions; keep >= 0; keep--) {
     const projected = projectTrajectory(messages, keep);
-    const apiMessages = prependSystemPrompt(projected, systemPrompt);
+    const apiMessages = prependSystemPrompt(
+      insertRuntimeToolPolicy(projected, maxToolCallsPerResponse),
+      systemPrompt,
+    );
     const estimatedTokens = estimateRequestTokens(apiMessages, tools);
     smallestEstimate = estimatedTokens;
     if (estimatedTokens <= maxInputTokens) {
