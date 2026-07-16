@@ -89,6 +89,7 @@ test("opens first-run settings and activates chat after secure save", async () =
   settings.selectReasoning("high");
   settings.selectRecentRawToolActions(3);
   settings.selectToolOutputSafetyLimit(65_536);
+  settings.selectMaxToolCallsPerResponse(1);
   await settings.confirm();
 
   assert.equal(settings.state.step, "done");
@@ -291,6 +292,36 @@ test("shows the projected API context percentage instead of canonical memory", a
   const output = stripAnsi(app.chatView!.render(80).join("\n"));
   assert.match(output, /api ctx 1\.4%/);
   assert.equal(output.includes("api ctx 8.7%"), false);
+});
+
+test("reads a saved tool-call maximum during an active run", async () => {
+  const terminal = new FakeTerminal();
+  let captured: RunOptions | undefined;
+  let release: (() => void) | undefined;
+  const app = new InlineAgentApp({
+    terminal,
+    initialConfig: config,
+    saveConfig: async () => undefined,
+    createClient: () => ({}) as any,
+    runAgent: async (options) => {
+      captured = options;
+      await new Promise<void>((resolve) => { release = resolve; });
+      return "done";
+    },
+  });
+  app.start();
+
+  const processing = app.submit("live settings");
+  await tick();
+  assert.equal(captured?.maxToolCallsPerResponse, 1);
+  assert.equal(captured?.maxToolCallsPerResponseLoader?.(), 1);
+
+  await app.applyConfig({ ...config, maxToolCallsPerResponse: 9 });
+  assert.equal(captured?.maxToolCallsPerResponse, 1);
+  assert.equal(captured?.maxToolCallsPerResponseLoader?.(), 9);
+
+  release?.();
+  await processing;
 });
 
 test("applies new runtime settings without clearing messages", async () => {

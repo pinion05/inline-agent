@@ -20,8 +20,10 @@ import {
   DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
   DEFAULT_RECENT_RAW_TOOL_ACTIONS,
   DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
+  MAX_MAX_TOOL_CALLS_PER_RESPONSE,
   MAX_RECENT_RAW_TOOL_ACTIONS,
   MAX_TOOL_OUTPUT_SAFETY_LIMIT,
+  MIN_MAX_TOOL_CALLS_PER_RESPONSE,
   MIN_RECENT_RAW_TOOL_ACTIONS,
   MIN_TOOL_OUTPUT_SAFETY_LIMIT,
   formatCharacterLimit,
@@ -50,6 +52,8 @@ export type SettingsStep =
   | "raw-actions-input"
   | "safety-limit"
   | "safety-limit-input"
+  | "max-tool-calls"
+  | "max-tool-calls-input"
   | "confirm"
   | "saving"
   | "done";
@@ -137,6 +141,11 @@ export class SettingsController {
   editToolOutputSafetyLimit(): void {
     this.returnToMenuAfterEdit = true;
     this.setState({ step: "safety-limit", models: this.state.models });
+  }
+
+  editMaxToolCallsPerResponse(): void {
+    this.returnToMenuAfterEdit = true;
+    this.setState({ step: "max-tool-calls", models: this.state.models });
   }
 
   selectProvider(provider: ProviderId): void {
@@ -262,7 +271,7 @@ export class SettingsController {
     ) return;
     this.draft.toolOutputSafetyLimit = value;
     if (this.finishMenuEdit()) return;
-    this.setState({ step: "confirm", models: this.state.models });
+    this.setState({ step: "max-tool-calls", models: this.state.models });
   }
 
   chooseCustomToolOutputSafetyLimit(): void {
@@ -286,8 +295,40 @@ export class SettingsController {
     this.selectToolOutputSafetyLimit(parsed);
   }
 
-  backToSafetyLimit(): void {
-    this.setState({ step: "safety-limit", models: this.state.models });
+  selectMaxToolCallsPerResponse(value: number): void {
+    if (
+      !Number.isInteger(value)
+      || value < MIN_MAX_TOOL_CALLS_PER_RESPONSE
+      || value > MAX_MAX_TOOL_CALLS_PER_RESPONSE
+    ) return;
+    this.draft.maxToolCallsPerResponse = value;
+    if (this.finishMenuEdit()) return;
+    this.setState({ step: "confirm", models: this.state.models });
+  }
+
+  chooseCustomMaxToolCallsPerResponse(): void {
+    this.setState({ step: "max-tool-calls-input", models: this.state.models });
+  }
+
+  submitMaxToolCallsPerResponse(value: string): void {
+    const parsed = Number(value.trim());
+    if (
+      !Number.isInteger(parsed)
+      || parsed < MIN_MAX_TOOL_CALLS_PER_RESPONSE
+      || parsed > MAX_MAX_TOOL_CALLS_PER_RESPONSE
+    ) {
+      this.setState({
+        step: "max-tool-calls-input",
+        models: this.state.models,
+        error: `응답당 최대 tool calls는 ${MIN_MAX_TOOL_CALLS_PER_RESPONSE}–${MAX_MAX_TOOL_CALLS_PER_RESPONSE} 사이여야 합니다.`,
+      });
+      return;
+    }
+    this.selectMaxToolCallsPerResponse(parsed);
+  }
+
+  backToMaxToolCalls(): void {
+    this.setState({ step: "max-tool-calls", models: this.state.models });
   }
 
   async confirm(): Promise<void> {
@@ -410,7 +451,7 @@ export class SettingsView implements Component, Focusable {
     const provider = providerDefinition(this.controller.draft.provider).label;
     this.root.addChild(new Text(
       tuiTheme.muted(
-        `${provider} │ ${this.controller.draft.model} │ reasoning ${this.controller.draft.reasoningEffort} │ raw ${this.controller.draft.recentRawToolActions} │ limit ${formatCharacterLimit(this.controller.draft.toolOutputSafetyLimit)} │ max raw ${formatApproximateCharacters(MAX_RECENT_RAW_TOOL_ACTIONS * this.controller.draft.toolOutputSafetyLimit)} │ key ${maskApiKey(this.controller.draft.apiKey)}`,
+        `${provider} │ ${this.controller.draft.model} │ reasoning ${this.controller.draft.reasoningEffort} │ raw ${this.controller.draft.recentRawToolActions} │ limit ${formatCharacterLimit(this.controller.draft.toolOutputSafetyLimit)} │ calls ${this.controller.draft.maxToolCallsPerResponse} │ max raw ${formatApproximateCharacters(MAX_RECENT_RAW_TOOL_ACTIONS * this.controller.draft.toolOutputSafetyLimit)} │ key ${maskApiKey(this.controller.draft.apiKey)}`,
       ),
       1,
       0,
@@ -453,6 +494,10 @@ export class SettingsView implements Component, Focusable {
               value: "safety-limit",
               label: `Output safety limit: ${formatCharacterLimit(this.controller.draft.toolOutputSafetyLimit)}`,
             },
+            {
+              value: "max-tool-calls",
+              label: `Max tool calls per response: ${this.controller.draft.maxToolCallsPerResponse}`,
+            },
             { value: "save", label: "저장 및 적용" },
             { value: "cancel", label: "취소" },
           ],
@@ -463,6 +508,8 @@ export class SettingsView implements Component, Focusable {
               this.controller.editRecentRawToolActions();
             } else if (value === "safety-limit") {
               this.controller.editToolOutputSafetyLimit();
+            } else if (value === "max-tool-calls") {
+              this.controller.editMaxToolCallsPerResponse();
             } else if (value === "save") void this.controller.confirm();
             else this.controller.cancel();
           },
@@ -556,16 +603,37 @@ export class SettingsView implements Component, Focusable {
         input.onSubmit = (value) => this.controller.submitToolOutputSafetyLimit(value);
         return this.inputGroup("출력 상한을 입력하세요 (예: 65536, 64K, 1M)", input);
       }
+      case "max-tool-calls":
+        return this.selector(
+          "한 assistant 응답의 최대 shell tool call 수를 선택하세요",
+          [1, 2, 3, 5, 10, 20, 50, 100]
+            .map((value) => ({
+              value: String(value),
+              label: `${value} calls`,
+            }))
+            .concat([{ value: "custom", label: "직접 입력 (1–100)" }]),
+          (value) => value === "custom"
+            ? this.controller.chooseCustomMaxToolCallsPerResponse()
+            : this.controller.selectMaxToolCallsPerResponse(Number(value)),
+        );
+      case "max-tool-calls-input": {
+        const input = new Input();
+        input.setValue(String(this.controller.draft.maxToolCallsPerResponse));
+        input.onSubmit = (value) => (
+          this.controller.submitMaxToolCallsPerResponse(value)
+        );
+        return this.inputGroup("응답당 최대 tool calls를 입력하세요 (1–100)", input);
+      }
       case "confirm":
         return this.selector(
           "이 설정을 저장하고 적용할까요?",
           [
             { value: "save", label: "저장 및 적용" },
-            { value: "back", label: "출력 상한 다시 선택" },
+            { value: "back", label: "최대 tool calls 다시 선택" },
           ],
           (value) => value === "save"
             ? void this.controller.confirm()
-            : this.controller.backToSafetyLimit(),
+            : this.controller.backToMaxToolCalls(),
         );
       case "saving":
         return new Text(tuiTheme.warning("◌ 설정 저장 중..."), 1, 0);

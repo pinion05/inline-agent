@@ -73,6 +73,8 @@ test("completes provider, auth, model, reasoning, and confirmation steps", async
   controller.selectRecentRawToolActions(5);
   assert.equal(controller.state.step, "safety-limit");
   controller.selectToolOutputSafetyLimit(262_144);
+  assert.equal(controller.state.step, "max-tool-calls");
+  controller.selectMaxToolCallsPerResponse(1);
   assert.equal(controller.state.step, "confirm");
   await controller.confirm();
 
@@ -113,12 +115,18 @@ test("opens a direct settings menu for an existing chat config", async () => {
   controller.selectToolOutputSafetyLimit(262_144);
   assert.equal(controller.state.step, "menu");
 
+  controller.editMaxToolCallsPerResponse();
+  assert.equal(controller.state.step, "max-tool-calls");
+  controller.selectMaxToolCallsPerResponse(9);
+  assert.equal(controller.state.step, "menu");
+
   await controller.confirm();
   assert.deepEqual(completed, [{
     ...existing,
     reasoningEffort: "max",
     recentRawToolActions: 5,
     toolOutputSafetyLimit: 262_144,
+    maxToolCallsPerResponse: 9,
   }]);
 });
 
@@ -176,9 +184,29 @@ test("accepts custom retention values and validates their ranges", () => {
   assert.equal(controller.state.step, "safety-limit-input");
   assert.match(controller.state.error ?? "", /4K.*1M/);
   controller.submitToolOutputSafetyLimit("256K");
+  assert.equal(controller.state.step, "max-tool-calls");
+  controller.selectMaxToolCallsPerResponse(1);
   assert.equal(controller.state.step, "confirm");
   assert.equal(controller.draft.recentRawToolActions, 20);
   assert.equal(controller.draft.toolOutputSafetyLimit, 262_144);
+});
+
+test("validates custom maximum tool calls per response", () => {
+  const controller = controllerWith(
+    { status: "success", models: ["model"] },
+    { initialConfig: existing },
+  );
+
+  controller.editMaxToolCallsPerResponse();
+  controller.chooseCustomMaxToolCallsPerResponse();
+  assert.equal(controller.state.step, "max-tool-calls-input");
+  controller.submitMaxToolCallsPerResponse("0");
+  assert.match(controller.state.error ?? "", /1.*100/);
+  controller.submitMaxToolCallsPerResponse("101");
+  assert.match(controller.state.error ?? "", /1.*100/);
+  controller.submitMaxToolCallsPerResponse("100");
+  assert.equal(controller.state.step, "menu");
+  assert.equal(controller.draft.maxToolCallsPerResponse, 100);
 });
 
 test("keeps global retention settings when the provider changes", () => {
@@ -198,13 +226,14 @@ test("keeps global retention settings when the provider changes", () => {
   assert.equal(controller.draft.toolOutputSafetyLimit, 128 * 1024);
 });
 
-test("defaults every provider draft to high reasoning, 3 raw actions, and 64K", () => {
+test("defaults every provider draft to high reasoning, retention, and one tool call", () => {
   for (const provider of ["zai", "openai", "custom"] as const) {
     const controller = controllerWith({ status: "success", models: ["model"] });
     controller.selectProvider(provider);
     assert.equal(controller.draft.reasoningEffort, "high");
     assert.equal(controller.draft.recentRawToolActions, 3);
     assert.equal(controller.draft.toolOutputSafetyLimit, 65_536);
+    assert.equal(controller.draft.maxToolCallsPerResponse, 1);
   }
 });
 
@@ -238,6 +267,7 @@ test("settings view masks secrets and remains width safe", () => {
   assert.match(plain, /Provider \/ API Key \/ Model/);
   assert.match(plain, /Raw tool actions: 3/);
   assert.match(plain, /Output safety limit: 64K/);
+  assert.match(plain, /Max tool calls per response: 1/);
   assert.match(stripAnsi(output), /raw 3/);
   assert.match(stripAnsi(output), /limit 64K/);
   assert.equal(output.includes(existing.apiKey), false);
