@@ -2,7 +2,7 @@
 
 # inline-agent
 
-**정크 컨텍스트 제거 — LLM 에이전트를 위한 보이지 않는 정보 정돈 레이어**
+**The agent requires nothing but a shell.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
