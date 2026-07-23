@@ -1,0 +1,75 @@
+name: npm-publish-dev
+
+# dev 브랜치에 push하면 prerelease 버전을 dev 태그로 게시.
+# latest(master 안정판)와 분리되어, npx inline-agent@dev 로 최신 개발판을 실행 가능.
+# 버전 형식: <base>-dev.<commit-sha-7> (예: 0.2.1-dev.a1b2c3d)
+# package.json은 건드리지 않고 게시 시점에만 임시 버전을 사용한다.
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # GitHub prerelease/태그 생성용
+
+jobs:
+  publish-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Verify (test + build)
+        run: |
+          npm test
+          npm run build
+
+      - name: Compute prerelease version
+        id: ver
+        run: |
+          BASE=$(node -p "require('./package.json').version")
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          VERSION="${BASE}-dev.${SHA}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Computed prerelease version: $VERSION"
+
+      - name: Publish prerelease under the dev tag
+        id: publish
+        run: |
+          set -e
+          VERSION="${{ steps.ver.outputs.version }}"
+          # package.json을 임시로 치환 (CI 워킹 카피만, 커밋하지 않음).
+          node -e "const p=require('./package.json'); p.version='${VERSION}'; require('fs').writeFileSync('./package.json', JSON.stringify(p,null,2)+'\n')"
+          REMOTE=$(npm view "inline-agent@${VERSION}" version 2>/dev/null || echo "none")
+          if [ "$REMOTE" != "none" ]; then
+            echo "::notice::inline-agent@${VERSION} already on npm — skipping publish."
+            exit 0
+          fi
+          # --tag dev 로 latest를 덮어쓰지 않는다.
+          npm publish --access public --tag dev
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::Published inline-agent@${VERSION} under the dev tag."
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub prerelease
+        if: steps.publish.outputs.published == 'true'
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          gh release create "v$VERSION" \
+            --target "${{ github.sha }}" \
+            --title "v$VERSION (dev)" \
+            --prerelease \
+            --notes "Development prerelease from the \`dev\` branch. Install with \`npx inline-agent@dev\`."
+          echo "::notice::Created GitHub prerelease v$VERSION."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
