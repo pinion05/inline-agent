@@ -1,0 +1,64 @@
+name: npm-publish
+
+# master에 push하면 자동 실행.
+# 같은 버전은 npm이 거부하므로, package.json 버전이 이미 npm에 존재하면 게시를 건너뛴다.
+# 새 버전을 올리고 push하면 자동으로 npm에 게시된다.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # GitHub Release/태그 생성용
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Verify (test + build)
+        run: |
+          npm test
+          npm run build
+
+      - name: Publish only if version is new
+        id: publish
+        run: |
+          set -e
+          LOCAL=$(node -p "require('./package.json').version")
+          REMOTE=$(npm view inline-agent version 2>/dev/null || echo "none")
+          echo "Local version:     $LOCAL"
+          echo "Published version: $REMOTE"
+          echo "version=$LOCAL" >> "$GITHUB_OUTPUT"
+          if [ "$LOCAL" = "$REMOTE" ]; then
+            echo "::notice::inline-agent@$LOCAL already on npm — skipping publish."
+            exit 0
+          fi
+          npm publish --access public
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::Published inline-agent@$LOCAL to npm."
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        if: steps.publish.outputs.published == 'true'
+        run: |
+          VERSION="${{ steps.publish.outputs.version }}"
+          gh release create "v$VERSION" \
+            --target "${{ github.sha }}" \
+            --title "v$VERSION" \
+            --generate-notes
+          echo "::notice::Created GitHub Release v$VERSION."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
