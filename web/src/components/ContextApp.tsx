@@ -112,10 +112,6 @@ export default function ContextApp() {
 
   onCleanup(() => es?.close());
 
-  const systemMessages = () => snapshot().apiMessages.filter(
-    (message) => message.role === 'system',
-  );
-
   const apiTokens = () => snapshot().apiMessages.reduce(
     (total, message) => total + estimateMessageTokens(message),
     Math.ceil(JSON.stringify(snapshot().apiTools).length / 4),
@@ -213,17 +209,6 @@ export default function ContextApp() {
             )}
           </For>
         </div>
-      </Show>
-
-      {/* Exact system prompt */}
-      <ContextSectionTitle title="실제 SYSTEM PROMPT" subtitle="API messages의 system 역할 원문" />
-      <Show
-        when={systemMessages().length > 0}
-        fallback={<EmptyContext>시스템 프롬프트 없음</EmptyContext>}
-      >
-        <For each={systemMessages()}>
-          {(message) => <RawBlock value={message.content} />}
-        </For>
       </Show>
 
       {/* Exact tool definitions */}
