@@ -27,12 +27,15 @@
     "inla": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "web/dist"
   ],
   "scripts": {
     "dev": "node web/scripts/dev-stack.mjs",
     "dev:agent": "tsx src/index.ts",
-    "build": "tsc",
+    "build": "npm run build:ts && npm run build:web",
+    "build:ts": "tsc",
+    "build:web": "cd web && npm install --no-audit --no-fund && npm run build",
     "start": "node dist/index.js",
     "test": "tsx test-trajectory.ts && tsx --test test/*.test.ts",
     "prepack": "npm run build"
