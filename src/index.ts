@@ -10,6 +10,7 @@ import * as readline from "node:readline";
 import type { AgentEvent } from "./agent-events.js";
 import {
   DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
+  DEFAULT_OPEN_BROWSER,
   DEFAULT_RECENT_RAW_TOOL_ACTIONS,
   DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
   environmentConfigSeed,
@@ -37,7 +38,8 @@ async function main(): Promise<void> {
   const loaded = await loadConfig();
   const seed = environmentConfigSeed();
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-  startServer({ silent: interactive });
+  const openBrowser = (loaded.status === "valid" ? loaded.config.openBrowser : seed.openBrowser) ?? true;
+  startServer({ silent: interactive, open: openBrowser });
 
   if (interactive) {
     const app = new InlineAgentApp({
@@ -88,6 +90,7 @@ function configForLineMode(
         ?? DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
       maxToolCallsPerResponse: seed.maxToolCallsPerResponse
         ?? DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
+      openBrowser: seed.openBrowser ?? DEFAULT_OPEN_BROWSER,
     };
   }
   return loaded.status === "valid" ? loaded.config : undefined;

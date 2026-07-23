@@ -36,6 +36,7 @@ const existing: AgentConfig = {
   recentRawToolActions: 3,
   toolOutputSafetyLimit: 65_536,
   maxToolCallsPerResponse: 1,
+  openBrowser: true,
 };
 
 function controllerWith(
@@ -87,6 +88,7 @@ test("completes provider, auth, model, reasoning, and confirmation steps", async
     recentRawToolActions: 5,
     toolOutputSafetyLimit: 262_144,
     maxToolCallsPerResponse: 1,
+    openBrowser: true,
   }]);
   assert.equal(controller.state.step, "done");
 });
@@ -224,6 +226,27 @@ test("keeps global retention settings when the provider changes", () => {
 
   assert.equal(controller.draft.recentRawToolActions, 7);
   assert.equal(controller.draft.toolOutputSafetyLimit, 128 * 1024);
+});
+
+test("toggles browser auto-open from the menu and persists it", async () => {
+  const completed: AgentConfig[] = [];
+  const controller = controllerWith(
+    { status: "success", models: ["glm-5.2"] },
+    { initialConfig: existing, completed },
+  );
+
+  assert.equal(controller.state.step, "menu");
+  assert.equal(controller.draft.openBrowser, true);
+
+  controller.toggleOpenBrowser();
+  assert.equal(controller.state.step, "menu");
+  assert.equal(controller.draft.openBrowser, false);
+
+  controller.toggleOpenBrowser();
+  assert.equal(controller.draft.openBrowser, true);
+
+  await controller.confirm();
+  assert.equal(completed[0]?.openBrowser, true);
 });
 
 test("defaults every provider draft to high reasoning, retention, and one tool call", () => {

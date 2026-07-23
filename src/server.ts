@@ -10,6 +10,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 import type { Message } from "./compact.js";
 import { DEFAULT_RECENT_RAW_TOOL_ACTIONS } from "./config.js";
 
@@ -174,7 +175,7 @@ export function recordUsage(promptTokens: number, cacheHitTokens: number) {
   broadcast();
 }
 
-export function startServer(options: { silent?: boolean } = {}): void {
+export function startServer(options: { silent?: boolean; open?: boolean } = {}): void {
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     // CORS
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -228,6 +229,29 @@ export function startServer(options: { silent?: boolean } = {}): void {
   });
 
   server.listen(PORT, () => {
-    if (!options.silent) process.stderr.write(`📊 http://localhost:${PORT}\n`);
+    const url = `http://localhost:${PORT}`;
+    if (!options.silent) process.stderr.write(`📊 ${url}\n`);
+    if (options.open !== false) openBrowser(url);
   });
+}
+
+/**
+ * 크로스플랫폼 기본 브라우저 오픈.
+ * macOS: open / Windows: start / 그 외(Linux 등): xdg-open.
+ * detach + unref로 자식 프로세스가 Node 종료를 막지 않게 한다.
+ */
+function openBrowser(url: string): void {
+  const command =
+    process.platform === "darwin" ? "open" :
+    process.platform === "win32" ? "cmd" :
+    "xdg-open";
+  const args =
+    process.platform === "win32" ? ["/c", "start", "", url] : [url];
+  try {
+    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    child.on("error", () => { /* 브라우저 오픈 실패는 치명적이지 않음 */ });
+    child.unref();
+  } catch {
+    /* 무시 */
+  }
 }

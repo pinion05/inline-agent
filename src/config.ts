@@ -22,6 +22,7 @@ export const MAX_TOOL_OUTPUT_SAFETY_LIMIT = 1024 * 1024;
 export const DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE = 1;
 export const MIN_MAX_TOOL_CALLS_PER_RESPONSE = 1;
 export const MAX_MAX_TOOL_CALLS_PER_RESPONSE = 100;
+export const DEFAULT_OPEN_BROWSER = true;
 
 export interface AgentConfig {
   version: 1;
@@ -33,6 +34,7 @@ export interface AgentConfig {
   recentRawToolActions: number;
   toolOutputSafetyLimit: number;
   maxToolCallsPerResponse: number;
+  openBrowser: boolean;
 }
 
 export type ConfigLoadResult =
@@ -137,6 +139,7 @@ export function environmentConfigSeed(
     recentRawToolActions: DEFAULT_RECENT_RAW_TOOL_ACTIONS,
     toolOutputSafetyLimit: DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
     maxToolCallsPerResponse: DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
+    openBrowser: DEFAULT_OPEN_BROWSER,
   };
   if (env.INLINE_BASE_URL) {
     return {
@@ -229,6 +232,11 @@ function parseConfig(value: unknown): AgentConfig {
     );
   }
 
+  const openBrowser = value.openBrowser ?? DEFAULT_OPEN_BROWSER;
+  if (typeof openBrowser !== "boolean") {
+    throw new Error("openBrowser must be a boolean");
+  }
+
   let baseURL: string | undefined;
   if (value.provider === "custom") {
     if (typeof value.baseURL !== "string" || value.baseURL.length === 0) {
@@ -251,6 +259,7 @@ function parseConfig(value: unknown): AgentConfig {
     recentRawToolActions,
     toolOutputSafetyLimit,
     maxToolCallsPerResponse,
+    openBrowser,
   };
 }
 

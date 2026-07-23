@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import {
   CONFIG_FILE,
   DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
+  DEFAULT_OPEN_BROWSER,
   DEFAULT_RECENT_RAW_TOOL_ACTIONS,
   DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
   environmentConfigSeed,
@@ -27,6 +28,7 @@ const validConfig: AgentConfig = {
   recentRawToolActions: 3,
   toolOutputSafetyLimit: 65_536,
   maxToolCallsPerResponse: 1,
+  openBrowser: true,
 };
 
 async function tempConfigPath(t: test.TestContext): Promise<string> {
@@ -91,6 +93,7 @@ test("fills runtime defaults when an existing v1 config omits them", async (t) =
     recentRawToolActions,
     toolOutputSafetyLimit,
     maxToolCallsPerResponse,
+    openBrowser,
     ...legacy
   } = validConfig;
   await writeFile(path, JSON.stringify(legacy));
@@ -105,6 +108,7 @@ test("fills runtime defaults when an existing v1 config omits them", async (t) =
       result.config.maxToolCallsPerResponse,
       DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
     );
+    assert.equal(result.config.openBrowser, DEFAULT_OPEN_BROWSER);
   }
 });
 
@@ -189,6 +193,7 @@ test("builds first-run seeds from existing environment variables", () => {
     recentRawToolActions: 3,
     toolOutputSafetyLimit: 65_536,
     maxToolCallsPerResponse: 1,
+    openBrowser: true,
   });
   assert.deepEqual(environmentConfigSeed({ OPENAI_API_KEY: "o-key" }), {
     provider: "openai",
@@ -198,6 +203,7 @@ test("builds first-run seeds from existing environment variables", () => {
     recentRawToolActions: 3,
     toolOutputSafetyLimit: 65_536,
     maxToolCallsPerResponse: 1,
+    openBrowser: true,
   });
   assert.deepEqual(environmentConfigSeed({
     INLINE_BASE_URL: "https://example.test/v1",
@@ -212,5 +218,6 @@ test("builds first-run seeds from existing environment variables", () => {
     recentRawToolActions: 3,
     toolOutputSafetyLimit: 65_536,
     maxToolCallsPerResponse: 1,
+    openBrowser: true,
   });
 });
