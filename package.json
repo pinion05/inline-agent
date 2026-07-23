@@ -1,6 +1,6 @@
 {
   "name": "inline-agent",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "정크 컨텍스트 제거 — LLM 에이전트를 위한 보이지 않는 정보 정돈 레이어",
   "license": "MIT",
   "type": "module",
