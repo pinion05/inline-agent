@@ -78,6 +78,14 @@ const ROLE_LABELS: Record<string, string> = {
   system: 'SYSTEM',
 };
 
+const COMPRESSED_COLOR = '#bc8cff';
+
+const COMPRESSED_MARKER = /\[\.\.\.\d+ chars compressed\.\.\.\]/;
+
+function isCompressedMessage(msg: ApiMessage): boolean {
+  return typeof msg.content === 'string' && COMPRESSED_MARKER.test(msg.content);
+}
+
 export default function ContextApp() {
   const [snapshot, setSnapshot] = createSignal<Snapshot>({
     stats: {
@@ -267,7 +275,10 @@ function estimateMessageTokens(message: ApiMessage): number {
 }
 
 function ApiMessageCard(props: { msg: ApiMessage; index: number }) {
-  const color = () => ROLE_COLORS[props.msg.role] ?? '#8b949e';
+  const compressed = () => isCompressedMessage(props.msg);
+  const color = () => compressed()
+    ? COMPRESSED_COLOR
+    : (ROLE_COLORS[props.msg.role] ?? '#8b949e');
   const label = () => ROLE_LABELS[props.msg.role] ?? props.msg.role.toUpperCase();
 
   return (
@@ -281,6 +292,14 @@ function ApiMessageCard(props: { msg: ApiMessage; index: number }) {
         <span style={{ color: '#8b949e', 'font-size': '10px', 'font-weight': '600' }}>
           #{props.index + 1} {label()}
         </span>
+        <Show when={compressed()}>
+          <span style={{
+            'font-size': '9px', padding: '1px 6px', 'border-radius': '10px',
+            background: COMPRESSED_COLOR + '22', color: COMPRESSED_COLOR,
+          }}>
+            compressed
+          </span>
+        </Show>
         <span style={{
           'font-size': '9px', padding: '1px 6px', 'border-radius': '10px',
           background: '#21262d', color: '#8b949e',
