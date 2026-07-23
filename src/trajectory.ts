@@ -266,7 +266,8 @@ export function compressResult(text: string): string {
 
     // --- Directory listing runs (>= 3 consecutive lines) ---
     if (isDirListingLine(line)) {
-      dirRun++;
+      // `total N` header is part of the listing but not an entry — don't count it.
+      if (!LS_TOTAL_LINE.test(line)) dirRun++;
       dirPending.push(line);
       continue;
     }

@@ -140,3 +140,17 @@ test("preserves a short (1-2 line) directory listing instead of dropping it (#56
 
   assert.equal(result, input);
 });
+
+test("counts only entries, not the `total N` header, in a dir listing (#56)", () => {
+  const input = [
+    "total 24",
+    "-rw-r--r--  a.ts",
+    "-rw-r--r--  b.ts",
+    "-rw-r--r--  c.ts",
+  ].join("\n");
+
+  const result = compressResult(input);
+
+  assert.match(result, /\[dir listing: 3 entries\]/);
+  assert.equal(result.includes("-rw-r--r--  a.ts"), false);
+});
