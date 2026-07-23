@@ -196,7 +196,9 @@ const LS_LONG_LINE = /^[dls-][rwx-]{9}\s/;
 const LS_TOTAL_LINE = /^total\s+\d+/i;
 const BUILD_PROGRESS_LINE =
   /make\[\d+\]:\s+(Entering|Leaving)\s+directory|^\s*(gcc|cc|c\+\+|g\+\+|linking|compiling|building|cmake|ninja|tsc|webpack|rollup|esbuild|vite)\b/i;
-const BUILD_DONE_LINE = /\b(build|compile|link|make)\b.*\b(succeed(?:ed)?|complete|done|finished)\b/i;
+const BUILD_DONE_LINE = /\b(build|compile|link|make)\b.*\b(succeed(?:ed)?|complete|done|finished|fail(?:ed)?)\b/i;
+const BUILD_FAIL_WORD = /\bfail(?:ed)?\b/i;
+const NONZERO_EXIT_LINE = /^\[exit:\s*([1-9]\d*)\]/;
 const NOISE_LINE = /__pycache__|\.pyc$|\.egg-info|\.git\/(objects|refs|logs)/;
 const ERROR_LINE =
   /error|fail|traceback|assert|exception|fatal|panic|cannot|denied|not found/i;
@@ -225,6 +227,7 @@ export function compressResult(text: string): string {
   let buildProgressSeen = false;
 
   let dirRun = 0; // active consecutive listing-line count
+  const dirPending: string[] = []; // buffered originals for a short run
 
   for (const line of lines) {
     // --- Strip noise: pycache, git internals ---
@@ -241,28 +244,40 @@ export function compressResult(text: string): string {
       continue;
     }
 
-    // --- Build progress lines ---
+    // --- Build progress / completion lines ---
+    // A progress line that also signals an error (e.g. "webpack compiled with 1 error")
+    // must be collected as a build error, not swallowed as pure progress.
     if (BUILD_PROGRESS_LINE.test(line)) {
       buildProgressSeen = true;
+      if (ERROR_LINE.test(line)) {
+        buildFailed = true;
+        buildErrors.push(line);
+      }
       continue;
     }
-    if (BUILD_DONE_LINE.test(line) && !ERROR_LINE.test(line)) {
+    // A build-done line ("Build succeeded", "Build failed", "compile complete").
+    // Mark failures; never carry the termination line into buildErrors (it would
+    // duplicate the [Build failed] summary header).
+    if (BUILD_DONE_LINE.test(line)) {
       buildProgressSeen = true;
+      if (BUILD_FAIL_WORD.test(line)) buildFailed = true;
       continue;
     }
 
     // --- Directory listing runs (>= 3 consecutive lines) ---
     if (isDirListingLine(line)) {
       dirRun++;
+      dirPending.push(line);
       continue;
     }
     if (dirRun >= 3) {
       kept.push(`[dir listing: ${dirRun} entries]`);
     } else if (dirRun > 0) {
-      // Too few to be a listing — keep them.
-      for (let k = 0; k < dirRun; k++) kept.push("__kept_dir__");
+      // Too few to be a listing — preserve the originals verbatim.
+      kept.push(...dirPending);
     }
     dirRun = 0;
+    dirPending.length = 0;
 
     // --- Errors during a build are collected for the build summary ---
     if (buildProgressSeen && ERROR_LINE.test(line)) {
@@ -287,7 +302,14 @@ export function compressResult(text: string): string {
       continue;
     }
 
-    // --- KEEP: exit code ---
+    // --- Non-zero exit marks the (build) run as failed even without an
+    //     error-looking line. Keep the marker; don't double-summarize. ---
+    const exitMatch = line.match(NONZERO_EXIT_LINE);
+    if (exitMatch) {
+      if (buildProgressSeen) buildFailed = true;
+      kept.push(line);
+      continue;
+    }
     if (/^\[exit:/.test(line)) {
       kept.push(line);
       continue;
@@ -301,13 +323,12 @@ export function compressResult(text: string): string {
   if (dirRun >= 3) {
     kept.push(`[dir listing: ${dirRun} entries]`);
   } else if (dirRun > 0) {
-    for (let k = 0; k < dirRun; k++) kept.push("__kept_dir__");
+    kept.push(...dirPending);
   }
 
   // --- Second pass: dedup consecutive identical kept lines ---
   const deduped: string[] = [];
   for (const line of kept) {
-    if (line === "__kept_dir__") continue; // placeholder, drop
     if (deduped[deduped.length - 1] === line) continue; // consecutive dup
     deduped.push(line);
   }

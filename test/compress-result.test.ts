@@ -93,3 +93,50 @@ test("keeps non-consecutive errors (dedup is consecutive-only) (#21)", () => {
   assert.match(result, /Error: first failure/);
   assert.match(result, /Error: second failure/);
 });
+
+test("treats a build-tool error line as a build failure, not progress (#56)", () => {
+  const input = [
+    "vite building production bundle",
+    "webpack compiled with 1 error",
+  ].join("\n");
+
+  const result = compressResult(input);
+
+  assert.match(result, /\[Build failed\]/);
+  assert.match(result, /webpack compiled with 1 error/);
+  assert.equal(result.includes("[Build succeeded]"), false);
+});
+
+test("marks build as failed on non-zero exit even without an error line (#56)", () => {
+  const input = [
+    "tsc compiling sources",
+    "[exit: 2]",
+  ].join("\n");
+
+  const result = compressResult(input);
+
+  assert.match(result, /\[Build failed\]/);
+  assert.equal(result.includes("[Build succeeded]"), false);
+});
+
+test("does not duplicate the build-failed termination line (#56)", () => {
+  const input = [
+    "tsc compiling sources",
+    "src/index.ts(10): error TS2304: Cannot find name 'foo'",
+    "Build failed",
+  ].join("\n");
+
+  const result = compressResult(input);
+
+  const occurrences = (result.match(/Build failed/g) ?? []).length;
+  assert.equal(occurrences, 1);
+  assert.match(result, /error TS2304/);
+});
+
+test("preserves a short (1-2 line) directory listing instead of dropping it (#56)", () => {
+  const input = "-rw-r--r--  README.md";
+
+  const result = compressResult(input);
+
+  assert.equal(result, input);
+});
