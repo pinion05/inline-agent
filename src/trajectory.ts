@@ -188,80 +188,141 @@ function mergeActionWithResults(
 }
 
 /**
- * Compress tool result using rule-based patterns.
- * Keep errors, failures, diffs. Remove noise.
+ * A run of directory-listing-like lines. `ls -l` rows start with a Unix
+ * permission token; `ls` plain rows are bare names. We treat 3+ consecutive
+ * matches as a listing and summarize it.
+ */
+const LS_LONG_LINE = /^[dls-][rwx-]{9}\s/;
+const LS_TOTAL_LINE = /^total\s+\d+/i;
+const BUILD_PROGRESS_LINE =
+  /make\[\d+\]:\s+(Entering|Leaving)\s+directory|^\s*(gcc|cc|c\+\+|g\+\+|linking|compiling|building|cmake|ninja|tsc|webpack|rollup|esbuild|vite)\b/i;
+const BUILD_DONE_LINE = /\b(build|compile|link|make)\b.*\b(succeed(?:ed)?|complete|done|finished)\b/i;
+const NOISE_LINE = /__pycache__|\.pyc$|\.egg-info|\.git\/(objects|refs|logs)/;
+const ERROR_LINE =
+  /error|fail|traceback|assert|exception|fatal|panic|cannot|denied|not found/i;
+
+function isDirListingLine(line: string): boolean {
+  return LS_LONG_LINE.test(line) || LS_TOTAL_LINE.test(line);
+}
+
+/**
+ * Compress tool result using rule-based patterns (#21).
+ * Keep errors, failures, diffs. Summarize noise:
+ *   - passed tests → `[N tests passed]`
+ *   - build logs   → `[Build succeeded]` or `[Build failed: <errors>]`
+ *   - dir listings → `[dir listing: N entries]`
+ *   - consecutive duplicate lines → deduped
+ * No LLM call. Pure pattern matching.
  */
 export function compressResult(text: string): string {
   const lines = text.split("\n");
-  const out: string[] = [];
+
+  // --- First pass: classify lines, collect summary signals ---
+  const kept: string[] = [];
   let passedCount = 0;
-  let skipDirListing = false;
+  let buildFailed = false;
+  const buildErrors: string[] = [];
+  let buildProgressSeen = false;
+
+  let dirRun = 0; // active consecutive listing-line count
 
   for (const line of lines) {
-    // --- Strip noise: passed tests ---
-    if (/^test_.*\s+\.\s+\[OK\]/i.test(line) || /\. PASSED/i.test(line)) {
-      passedCount++;
-      continue;
-    }
-    if (/^test.*\.\.\.\s+ok$/i.test(line)) {
-      passedCount++;
-      continue;
-    }
-    if (/^\[ *\d+%\] (passed|ok)/i.test(line)) {
-      passedCount++;
-      continue;
-    }
-
     // --- Strip noise: pycache, git internals ---
-    if (/__pycache__|\.pyc$|\.egg-info|\.git\/(objects|refs|logs)/.test(line)) {
-      skipDirListing = true;
+    if (NOISE_LINE.test(line)) continue;
+
+    // --- Passed tests ---
+    if (
+      /^test_.*\s+\.\s+\[OK\]/i.test(line)
+      || /\. PASSED/i.test(line)
+      || /^test.*\.\.\.\s+ok$/i.test(line)
+      || /^\[ *\d+%\] (passed|ok)/i.test(line)
+    ) {
+      passedCount++;
       continue;
     }
 
-    // --- Strip noise: build progress ---
-    if (/make\[\d+\]: (Entering|Leaving) directory/.test(line)) {
+    // --- Build progress lines ---
+    if (BUILD_PROGRESS_LINE.test(line)) {
+      buildProgressSeen = true;
       continue;
     }
-    if (/^\s*(gcc|cc|c\+\+|linking|compiling|building)\s/i.test(line)) {
+    if (BUILD_DONE_LINE.test(line) && !ERROR_LINE.test(line)) {
+      buildProgressSeen = true;
+      continue;
+    }
+
+    // --- Directory listing runs (>= 3 consecutive lines) ---
+    if (isDirListingLine(line)) {
+      dirRun++;
+      continue;
+    }
+    if (dirRun >= 3) {
+      kept.push(`[dir listing: ${dirRun} entries]`);
+    } else if (dirRun > 0) {
+      // Too few to be a listing — keep them.
+      for (let k = 0; k < dirRun; k++) kept.push("__kept_dir__");
+    }
+    dirRun = 0;
+
+    // --- Errors during a build are collected for the build summary ---
+    if (buildProgressSeen && ERROR_LINE.test(line)) {
+      buildFailed = true;
+      buildErrors.push(line);
       continue;
     }
 
     // --- KEEP: errors, failures, tracebacks ---
-    // Always keep lines with error/fail/traceback/assert/exception.
-    if (
-      /error|fail|traceback|assert|exception|fatal|panic|cannot|denied|not found/i.test(
-        line
-      )
-    ) {
-      out.push(line);
+    if (ERROR_LINE.test(line)) {
+      kept.push(line);
       continue;
     }
 
-    // --- KEEP: file change indicators ---
+    // --- KEEP: file change indicators (git status / diff) ---
     if (/^\s*[+~\-MADRC?!]{1,2}\s/.test(line)) {
-      // git status format
-      out.push(line);
+      kept.push(line);
       continue;
     }
     if (/^@@|^\+{3}|^---/.test(line)) {
-      // diff headers
-      out.push(line);
+      kept.push(line);
       continue;
     }
 
     // --- KEEP: exit code ---
     if (/^\[exit:/.test(line)) {
-      out.push(line);
+      kept.push(line);
       continue;
     }
 
-    // --- KEEP: everything else (within limits) ---
-    out.push(line);
+    // --- KEEP: everything else ---
+    kept.push(line);
   }
 
-  let result = out.join("\n");
+  // Flush a trailing directory run.
+  if (dirRun >= 3) {
+    kept.push(`[dir listing: ${dirRun} entries]`);
+  } else if (dirRun > 0) {
+    for (let k = 0; k < dirRun; k++) kept.push("__kept_dir__");
+  }
 
-  // Summarize passed tests in one line.
+  // --- Second pass: dedup consecutive identical kept lines ---
+  const deduped: string[] = [];
+  for (const line of kept) {
+    if (line === "__kept_dir__") continue; // placeholder, drop
+    if (deduped[deduped.length - 1] === line) continue; // consecutive dup
+    deduped.push(line);
+  }
+
+  let result = deduped.join("\n");
+
+  // --- Build summary (prepend) ---
+  if (buildProgressSeen) {
+    const summary = buildFailed
+      ? `[Build failed]\n${buildErrors.join("\n")}`
+      : "[Build succeeded]";
+    result = `${summary}\n${result}`;
+  }
+
+  // --- Passed-test summary (prepend) ---
   if (passedCount > 0) {
     result = `[${passedCount} tests passed]\n` + result;
   }
