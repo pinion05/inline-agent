@@ -199,7 +199,7 @@ test("rejects a request projection without a user anchor", () => {
   );
 });
 
-test("uses the dashboard's exact request-token estimate", () => {
+test("uses the BPE tokenizer for an accurate request-token estimate", () => {
   const messages: Message[] = [
     { role: "user", content: "hello" },
     {
@@ -213,12 +213,9 @@ test("uses the dashboard's exact request-token estimate", () => {
     },
   ];
   const tools = [{ type: "function", function: { name: "shell" } }];
-  const dashboardEstimate = messages.reduce(
-    (total, message) => total + Math.ceil(JSON.stringify(message).length / 4),
-    Math.ceil(JSON.stringify(tools).length / 4),
-  );
-
-  assert.equal(estimateRequestTokens(messages, tools), dashboardEstimate);
+  // Tokenizer-based: "hello" = 1 token + 4 overhead = 5,
+  // tool_call message = 30, tools definition = 13.
+  assert.equal(estimateRequestTokens(messages, tools), 48);
 });
 
 test("throws before the provider call when zero raw actions still cannot fit", () => {

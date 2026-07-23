@@ -1,8 +1,12 @@
 /**
  * Token estimation + compaction trigger.
  *
- * Uses API usage when available, falls back to chars/4.
+ * Per-message token counts come from the GPT BPE tokenizer (tokenize.ts)
+ * since the API only reports aggregate usage. When a recent API usage is
+ * available, we anchor on that and only estimate the messages added since.
  */
+
+import { estimateMessageTokens, estimateTokens } from "./tokenize.js";
 
 export interface Message {
   role: "system" | "user" | "assistant" | "tool";
@@ -19,19 +23,8 @@ export interface UsageInfo {
 
 const COMPACTION_BUFFER = 16_000;
 
-/** Rough token estimate: ~4 chars per token. */
-export function estimateTokens(messages: Message[]): number {
-  let chars = 0;
-  for (const m of messages) {
-    chars += m.content?.length ?? 0;
-    if (m.tool_calls) {
-      for (const tc of m.tool_calls) {
-        chars += JSON.stringify(tc).length;
-      }
-    }
-  }
-  return Math.ceil(chars / 4);
-}
+// Re-exported so existing imports (`from "./compact.js"`) keep working.
+export { estimateTokens };
 
 /**
  * Check if we need trajectory compression.
@@ -57,9 +50,4 @@ export function needsCompression(
 
   const usable = Math.max(0, contextWindow - Math.max(COMPACTION_BUFFER, maxOutput));
   return tokens >= usable;
-}
-
-function estimateMessageTokens(msg: Message): number {
-  const text = JSON.stringify(msg);
-  return Math.ceil(text.length / 4);
 }

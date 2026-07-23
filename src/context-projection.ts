@@ -1,6 +1,7 @@
 import type { Message } from "./compact.js";
 import { insertRuntimeToolPolicy } from "./runtime-tool-policy.js";
 import { prependSystemPrompt } from "./system-prompt.js";
+import { estimateMessageTokens, estimateRawTokens } from "./tokenize.js";
 import { projectTrajectory } from "./trajectory.js";
 
 export interface ContextProjectionOptions {
@@ -77,7 +78,7 @@ export function estimateRequestTokens(
   tools: unknown[],
 ): number {
   return messages.reduce(
-    (total, message) => total + Math.ceil(JSON.stringify(message).length / 4),
-    Math.ceil(JSON.stringify(tools).length / 4),
+    (total, message) => total + estimateMessageTokens(message),
+    estimateRawTokens(JSON.stringify(tools)),
   );
 }
