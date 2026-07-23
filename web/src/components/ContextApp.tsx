@@ -11,6 +11,7 @@ interface ApiMessage {
   content: string;
   tool_call_id?: string;
   tool_calls?: ToolCall[];
+  tokens?: number;
 }
 
 interface Stats {
@@ -121,7 +122,7 @@ export default function ContextApp() {
   onCleanup(() => es?.close());
 
   const apiTokens = () => snapshot().apiMessages.reduce(
-    (total, message) => total + estimateMessageTokens(message),
+    (total, message) => total + (message.tokens ?? 0),
     Math.ceil(JSON.stringify(snapshot().apiTools).length / 4),
   );
 
@@ -270,10 +271,6 @@ function Stat(props: { label: string; value: string; color?: string }) {
   );
 }
 
-function estimateMessageTokens(message: ApiMessage): number {
-  return Math.ceil(JSON.stringify(message).length / 4);
-}
-
 function ApiMessageCard(props: { msg: ApiMessage; index: number }) {
   const compressed = () => isCompressedMessage(props.msg);
   const color = () => compressed()
@@ -304,7 +301,7 @@ function ApiMessageCard(props: { msg: ApiMessage; index: number }) {
           'font-size': '9px', padding: '1px 6px', 'border-radius': '10px',
           background: '#21262d', color: '#8b949e',
         }}>
-          ~{estimateMessageTokens(props.msg)} tok
+          ~{props.msg.tokens ?? '?'} tok
         </span>
       </div>
 

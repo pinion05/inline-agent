@@ -2,13 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  estimateTokens,
   getSnapshot,
   recordApiContext,
   recordCompression,
   recordSafetyTruncation,
   recordUsage,
 } from "../src/server.js";
+import { estimateTokens } from "../src/tokenize.js";
 import type { Message } from "../src/compact.js";
 
 test("records canonical recovery compaction without mixing it into safety metrics", () => {

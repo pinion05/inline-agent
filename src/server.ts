@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import type { Message } from "./compact.js";
 import { DEFAULT_RECENT_RAW_TOOL_ACTIONS } from "./config.js";
+import { estimateMessageTokens, estimateTokens } from "./tokenize.js";
 
 const PORT = parseInt(process.env.INLINE_PORT ?? "7878", 10);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -59,19 +60,13 @@ export interface Stats {
   lastAction: string;
 }
 
-export function estimateTokens(messages: Message[]): number {
-  let chars = 0;
-  for (const m of messages) {
-    chars += m.content?.length ?? 0;
-    if (m.tool_calls) for (const tc of m.tool_calls) chars += JSON.stringify(tc).length;
-  }
-  return Math.ceil(chars / 4);
-}
-
 export function getSnapshot() {
   return {
     stats: currentStats,
-    apiMessages: lastApiMessages,
+    apiMessages: lastApiMessages.map((m) => ({
+      ...m,
+      tokens: estimateMessageTokens(m),
+    })),
     apiTools: lastApiTools,
     apiModel: lastApiModel,
     apiReasoningEffort: lastApiReasoningEffort,
@@ -80,10 +75,7 @@ export function getSnapshot() {
       content: m.content ?? "",
       toolCalls: m.tool_calls,
       toolCallId: m.tool_call_id,
-      tokens: Math.ceil(
-        ((m.content?.length ?? 0) +
-          (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0)) / 4
-      ),
+      tokens: estimateMessageTokens(m),
     })),
   };
 }
