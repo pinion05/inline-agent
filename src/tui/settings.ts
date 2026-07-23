@@ -18,6 +18,7 @@ import {
 
 import {
   DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
+  DEFAULT_OPEN_BROWSER,
   DEFAULT_RECENT_RAW_TOOL_ACTIONS,
   DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
   MAX_MAX_TOOL_CALLS_PER_RESPONSE,
@@ -74,6 +75,7 @@ export interface SettingsDraft {
   recentRawToolActions: number;
   toolOutputSafetyLimit: number;
   maxToolCallsPerResponse: number;
+  openBrowser: boolean;
 }
 
 interface SettingsControllerOptions {
@@ -115,6 +117,7 @@ export class SettingsController {
         ?? DEFAULT_TOOL_OUTPUT_SAFETY_LIMIT,
       maxToolCallsPerResponse: source.maxToolCallsPerResponse
         ?? DEFAULT_MAX_TOOL_CALLS_PER_RESPONSE,
+      openBrowser: source.openBrowser ?? DEFAULT_OPEN_BROWSER,
     };
   }
 
@@ -146,6 +149,11 @@ export class SettingsController {
   editMaxToolCallsPerResponse(): void {
     this.returnToMenuAfterEdit = true;
     this.setState({ step: "max-tool-calls", models: this.state.models });
+  }
+
+  toggleOpenBrowser(): void {
+    this.draft.openBrowser = !this.draft.openBrowser;
+    this.setState({ step: "menu", models: this.state.models });
   }
 
   selectProvider(provider: ProviderId): void {
@@ -395,6 +403,7 @@ export class SettingsController {
       recentRawToolActions: this.draft.recentRawToolActions,
       toolOutputSafetyLimit: this.draft.toolOutputSafetyLimit,
       maxToolCallsPerResponse: this.draft.maxToolCallsPerResponse,
+      openBrowser: this.draft.openBrowser,
     };
   }
 
@@ -451,7 +460,7 @@ export class SettingsView implements Component, Focusable {
     const provider = providerDefinition(this.controller.draft.provider).label;
     this.root.addChild(new Text(
       tuiTheme.muted(
-        `${provider} │ ${this.controller.draft.model} │ reasoning ${this.controller.draft.reasoningEffort} │ raw ${this.controller.draft.recentRawToolActions} │ limit ${formatCharacterLimit(this.controller.draft.toolOutputSafetyLimit)} │ calls ${this.controller.draft.maxToolCallsPerResponse} │ max raw ${formatApproximateCharacters(MAX_RECENT_RAW_TOOL_ACTIONS * this.controller.draft.toolOutputSafetyLimit)} │ key ${maskApiKey(this.controller.draft.apiKey)}`,
+        `${provider} │ ${this.controller.draft.model} │ reasoning ${this.controller.draft.reasoningEffort} │ raw ${this.controller.draft.recentRawToolActions} │ limit ${formatCharacterLimit(this.controller.draft.toolOutputSafetyLimit)} │ calls ${this.controller.draft.maxToolCallsPerResponse} │ browser ${this.controller.draft.openBrowser ? "on" : "off"} │ max raw ${formatApproximateCharacters(MAX_RECENT_RAW_TOOL_ACTIONS * this.controller.draft.toolOutputSafetyLimit)} │ key ${maskApiKey(this.controller.draft.apiKey)}`,
       ),
       1,
       0,
@@ -498,6 +507,10 @@ export class SettingsView implements Component, Focusable {
               value: "max-tool-calls",
               label: `Max tool calls per response: ${this.controller.draft.maxToolCallsPerResponse}`,
             },
+            {
+              value: "open-browser",
+              label: `Browser auto-open: ${this.controller.draft.openBrowser ? "on" : "off"}`,
+            },
             { value: "save", label: "저장 및 적용" },
             { value: "cancel", label: "취소" },
           ],
@@ -510,6 +523,8 @@ export class SettingsView implements Component, Focusable {
               this.controller.editToolOutputSafetyLimit();
             } else if (value === "max-tool-calls") {
               this.controller.editMaxToolCallsPerResponse();
+            } else if (value === "open-browser") {
+              this.controller.toggleOpenBrowser();
             } else if (value === "save") void this.controller.confirm();
             else this.controller.cancel();
           },
