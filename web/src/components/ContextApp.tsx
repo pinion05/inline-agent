@@ -163,11 +163,6 @@ export default function ContextApp() {
             color="#d29922"
           />
           <Stat
-            label="Raw Actions"
-            value={`${snapshot().stats.effectiveRawActions}/${snapshot().stats.configuredRawActions}`}
-            color="#d29922"
-          />
-          <Stat
             label="캐시히트"
             value={snapshot().stats.cacheHitTokens.toLocaleString()}
             color="#3fb950"
