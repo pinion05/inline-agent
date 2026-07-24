@@ -72,6 +72,33 @@ test("creates provider clients with the expected connection options", () => {
   ]);
 });
 
+test("injects an observable fetch when an onFetch sink is provided", () => {
+  const calls: unknown[] = [];
+  const factory = (options: unknown) => {
+    calls.push(options);
+    return { options } as any;
+  };
+  const sink = () => undefined;
+
+  createProviderClient(baseConfig, factory, sink);
+
+  const options = calls[0] as Record<string, unknown>;
+  assert.equal(typeof options.fetch, "function", "fetch option must be a function");
+});
+
+test("omits fetch entirely when no onFetch sink is provided", () => {
+  const calls: unknown[] = [];
+  const factory = (options: unknown) => {
+    calls.push(options);
+    return { options } as any;
+  };
+
+  createProviderClient(baseConfig, factory);
+
+  const options = calls[0] as Record<string, unknown>;
+  assert.equal(options.fetch, undefined, "fetch must be absent without a sink");
+});
+
 test("returns sorted unique model IDs from the provider", async () => {
   const client = {
     models: {

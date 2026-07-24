@@ -14,6 +14,7 @@ import { spawn } from "node:child_process";
 import type { Message } from "./compact.js";
 import { DEFAULT_RECENT_RAW_TOOL_ACTIONS } from "./config.js";
 import { estimateMessageTokens, estimateTokens } from "./tokenize.js";
+import type { HttpRequestCapture } from "./http-observer.js";
 
 const PORT = parseInt(process.env.INLINE_PORT ?? "7878", 10);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,10 @@ let lastApiMessages: Message[] = [];
 let lastApiTools: unknown[] = [];
 let lastApiModel: string | null = null;
 let lastApiReasoningEffort: string | null = null;
+
+/** Ring buffer of the most recent HTTP request captures (newest last). */
+const HTTP_REQUEST_BUFFER_LIMIT = 20;
+let lastHttpRequests: HttpRequestCapture[] = [];
 let currentStats: Stats = {
   totalTokens: 0,
   messageCount: 0,
@@ -68,6 +73,7 @@ export function getSnapshot() {
     apiTools: lastApiTools,
     apiModel: lastApiModel,
     apiReasoningEffort: lastApiReasoningEffort,
+    httpRequests: lastHttpRequests.slice().reverse(),
   };
 }
 
@@ -158,6 +164,19 @@ export function recordUsage(promptTokens: number, cacheHitTokens: number) {
   broadcast();
 }
 
+/**
+ * Record one HTTP request capture (one fetch attempt) into the ring buffer.
+ * Newest entries are kept; once the limit is reached the oldest is dropped.
+ * Auth headers are already stripped by the observer before this is called.
+ */
+export function recordHttpRequest(capture: HttpRequestCapture): void {
+  lastHttpRequests.push(capture);
+  if (lastHttpRequests.length > HTTP_REQUEST_BUFFER_LIMIT) {
+    lastHttpRequests = lastHttpRequests.slice(-HTTP_REQUEST_BUFFER_LIMIT);
+  }
+  broadcast();
+}
+
 export function startServer(options: { silent?: boolean; open?: boolean } = {}): void {
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     // CORS
@@ -211,7 +230,7 @@ export function startServer(options: { silent?: boolean; open?: boolean } = {}):
     );
   });
 
-  server.listen(PORT, () => {
+  server.listen(PORT, "127.0.0.1", () => {
     const url = `http://localhost:${PORT}`;
     if (!options.silent) process.stderr.write(`📊 ${url}\n`);
     if (options.open !== false) openBrowser(url);

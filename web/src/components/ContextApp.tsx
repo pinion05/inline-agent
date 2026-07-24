@@ -33,6 +33,19 @@ interface Stats {
   lastAction: string;
 }
 
+interface HttpRequestCapture {
+  id: number;
+  timestamp: string;
+  url: string;
+  method: string;
+  body: string | null;
+  headers: Record<string, string>;
+  attempt: number;
+  status: number | null;
+  durationMs: number | null;
+  error: string | null;
+}
+
 interface Snapshot {
   stats: Stats;
   apiMessages: ApiMessage[];
@@ -40,6 +53,7 @@ interface Snapshot {
   apiTools: unknown[];
   apiModel: string | null;
   apiReasoningEffort: string | null;
+  httpRequests: HttpRequestCapture[];
 }
 
 function normalizeSnapshot(next: Snapshot): Snapshot {
@@ -64,6 +78,7 @@ function normalizeSnapshot(next: Snapshot): Snapshot {
     apiTools: next.apiTools ?? [],
     apiModel: next.apiModel ?? null,
     apiReasoningEffort: next.apiReasoningEffort ?? null,
+    httpRequests: next.httpRequests ?? [],
   };
 }
 
@@ -109,6 +124,7 @@ export default function ContextApp() {
     apiTools: [],
     apiModel: null,
     apiReasoningEffort: null,
+    httpRequests: [],
   });
   let es: EventSource | undefined;
 
@@ -215,6 +231,17 @@ export default function ContextApp() {
             )}
           </For>
         </div>
+      </Show>
+
+      {/* Exact HTTP requests (actual wire bodies, from the fetch observer) */}
+      <ContextSectionTitle title="실제 HTTP 요청" subtitle="SDK가 실제로 전송한 HTTP 요청 본문 (재시도 포함, 인증 헤더 제외)" />
+      <Show
+        when={snapshot().httpRequests.length > 0}
+        fallback={<EmptyContext>아직 전송된 요청이 없습니다.</EmptyContext>}
+      >
+        <For each={snapshot().httpRequests}>
+          {(req) => <HttpRequestCard capture={req} />}
+        </For>
       </Show>
 
       {/* Exact tool definitions */}
@@ -342,6 +369,78 @@ function ApiMessageCard(props: { msg: ApiMessage; index: number; tokens: number 
         'word-break': 'break-word', 'font-size': '11px',
         'line-height': '1.5', 'max-height': '600px', overflow: 'auto',
       }}>{JSON.stringify(props.msg, null, 2)}</pre>
+    </div>
+  );
+}
+
+function HttpRequestCard(props: { capture: HttpRequestCapture }) {
+  const c = props.capture;
+  const statusColor = () => {
+    if (c.status === null) return '#f85149';
+    if (c.status >= 200 && c.status < 300) return '#3fb950';
+    if (c.status >= 400 && c.status < 500) return '#d29922';
+    return '#f85149';
+  };
+
+  return (
+    <div style={{
+      'margin-bottom': '10px', padding: '14px 16px',
+      'border-radius': '8px',
+      'border-left': `3px solid ${statusColor()}`,
+      background: '#161b22',
+    }}>
+      <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', 'flex-wrap': 'wrap', 'margin-bottom': '10px' }}>
+        <span style={{ color: '#8b949e', 'font-size': '10px', 'font-weight': '600' }}>
+          #{c.id} 시도 {c.attempt}
+        </span>
+        <span style={{
+          'font-size': '9px', padding: '1px 6px', 'border-radius': '10px',
+          background: '#21262d', color: statusColor(),
+        }}>
+          {c.method}
+        </span>
+        <span style={{ color: '#8b949e', 'font-size': '11px', 'word-break': 'break-all' }}>
+          {c.url}
+        </span>
+        <Show when={c.status !== null}>
+          <span style={{
+            'font-size': '9px', padding: '1px 6px', 'border-radius': '10px',
+            background: statusColor() + '22', color: statusColor(),
+          }}>
+            {c.status}
+          </span>
+        </Show>
+        <Show when={c.durationMs !== null}>
+          <span style={{ color: '#8b949e', 'font-size': '9px' }}>
+            {c.durationMs}ms
+          </span>
+        </Show>
+        <Show when={c.attempt > 0}>
+          <span style={{
+            'font-size': '9px', padding: '1px 6px', 'border-radius': '10px',
+            background: '#d2992222', color: '#d29922',
+          }}>
+            재시도
+          </span>
+        </Show>
+      </div>
+
+      <Show when={c.error !== null}>
+        <div style={{ color: '#f85149', 'font-size': '11px', 'margin-bottom': '8px' }}>
+          ⚠ {c.error}
+        </div>
+      </Show>
+
+      <Show when={c.body !== null}>
+        <FieldLabel>요청 본문 (실제 전송본)</FieldLabel>
+        <pre style={{
+          margin: '4px 0 0', padding: '10px 12px',
+          background: '#0d1117', color: '#c9d1d9',
+          'border-radius': '6px', 'white-space': 'pre-wrap',
+          'word-break': 'break-word', 'font-size': '12px',
+          'line-height': '1.55', 'max-height': '600px', overflow: 'auto',
+        }}>{c.body}</pre>
+      </Show>
     </div>
   );
 }

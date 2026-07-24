@@ -24,7 +24,7 @@ import {
   guessContextWindow,
   providerDefinition,
 } from "./provider.js";
-import { startServer } from "./server.js";
+import { recordHttpRequest, startServer } from "./server.js";
 import { InlineAgentApp } from "./tui/app.js";
 import {
   formatAgentReply,
@@ -97,7 +97,7 @@ function configForLineMode(
 }
 
 async function startLineMode(config: AgentConfig): Promise<void> {
-  const client = createProviderClient(config);
+  const client = createProviderClient(config, undefined, recordHttpRequest);
   const contextWindow = guessContextWindow(config.model);
   const messages: Message[] = [];
   const promptColors = supportsColor(process.stderr);
