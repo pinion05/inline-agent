@@ -1,10 +1,14 @@
-import OpenAI from "openai";
+import OpenAI, { type ClientOptions } from "openai";
 
 import type {
   AgentConfig,
   ProviderId,
   ReasoningEffort,
 } from "./config.js";
+import {
+  createObservableFetch,
+  type HttpRequestCapture,
+} from "./http-observer.js";
 
 export interface ProviderDefinition {
   id: ProviderId;
@@ -72,21 +76,28 @@ export function providerDefinition(provider: ProviderId): ProviderDefinition {
   };
 }
 
-type OpenAIOptions = ConstructorParameters<typeof OpenAI>[0];
+type OpenAIOptions = ClientOptions;
 type OpenAIFactory = (options: OpenAIOptions) => OpenAI;
 
 export function createProviderClient(
   config: AgentConfig,
   factory: OpenAIFactory = (options) => new OpenAI(options),
+  onFetch?: (capture: HttpRequestCapture) => void,
 ): OpenAI {
   const definition = providerDefinition(config.provider);
   const baseURL = config.provider === "custom"
     ? config.baseURL
     : definition.baseURL;
-  return factory({
+  const options: OpenAIOptions = {
     apiKey: config.apiKey,
     ...(baseURL ? { baseURL } : {}),
-  });
+  };
+  // When an observer sink is provided, wrap fetch so every HTTP attempt
+  // (original + retries) is captured for the dashboard.
+  if (onFetch) {
+    options.fetch = createObservableFetch(onFetch) as ClientOptions["fetch"];
+  }
+  return factory(options);
 }
 
 export async function listProviderModels(

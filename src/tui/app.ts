@@ -21,6 +21,7 @@ import {
   listProviderModels,
   type ModelDiscoveryResult,
 } from "../provider.js";
+import { recordHttpRequest } from "../server.js";
 import { ChatView } from "./chat.js";
 import { SettingsController, SettingsView } from "./settings.js";
 
@@ -72,7 +73,8 @@ export class InlineAgentApp {
     this.configError = options.configError;
     this.saveConfigImpl = options.saveConfig ?? ((config) => persistConfig(config));
     this.discoverModelsImpl = options.discoverModels ?? ((config) => listProviderModels(config));
-    this.createClientImpl = options.createClient ?? createProviderClient;
+    this.createClientImpl = options.createClient
+      ?? ((config) => createProviderClient(config, undefined, recordHttpRequest));
     this.runAgentImpl = options.runAgent ?? run;
     this.onExit = options.onExit;
   }
