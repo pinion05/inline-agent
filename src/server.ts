@@ -10,6 +10,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { Message } from "./compact.js";
 import { DEFAULT_RECENT_RAW_TOOL_ACTIONS } from "./config.js";
@@ -29,6 +30,14 @@ let lastApiReasoningEffort: string | null = null;
 /** Ring buffer of the most recent HTTP request captures (newest last). */
 const HTTP_REQUEST_BUFFER_LIMIT = 20;
 let lastHttpRequests: HttpRequestCapture[] = [];
+
+/**
+ * Per-process auth token for the dashboard. Generated on server start so
+ * that only the browser URL we open (which embeds the token) can read the
+ * SSE stream. A malicious website on another origin cannot guess it, which
+ * closes the cross-origin SSE exfiltration vector.
+ */
+let dashboardToken: string | null = null;
 let currentStats: Stats = {
   totalTokens: 0,
   messageCount: 0,
@@ -178,11 +187,21 @@ export function recordHttpRequest(capture: HttpRequestCapture): void {
 }
 
 export function startServer(options: { silent?: boolean; open?: boolean } = {}): void {
+  dashboardToken = randomUUID();
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    // CORS
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    // No wildcard CORS: the dashboard is same-origin (served from this same
+    // server on localhost), and the SSE endpoint requires a per-process token.
+    // A wildcard would let any website the user visits read their LLM session.
 
-    if (req.url === "/events") {
+    if (req.url?.startsWith("/events")) {
+      // Require the per-process token as a query parameter. Only the browser
+      // URL we open (which embeds it) knows it; a cross-origin page cannot guess it.
+      const url = new URL(req.url, `http://localhost:${PORT}`);
+      if (url.searchParams.get("token") !== dashboardToken) {
+        res.writeHead(403, { "Content-Type": "text/plain" });
+        res.end("forbidden");
+        return;
+      }
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -197,11 +216,21 @@ export function startServer(options: { silent?: boolean; open?: boolean } = {}):
       return;
     }
 
-    // Serve built frontend if available
+    // Serve built frontend if available. Static assets (HTML/JS/CSS) are
+    // public; the sensitive data only leaves via /events, which is token-gated.
     if (existsSync(WEB_DIST)) {
-      let filePath = req.url === "/" ? "/index.html" : req.url!;
-      const fullPath = join(WEB_DIST, filePath);
-      if (existsSync(fullPath)) {
+      const requestUrl = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+      const requestPath = requestUrl.pathname;
+      const filePath = requestPath === "/" ? "/index.html" : requestPath;
+      // Normalize and guard against path traversal outside WEB_DIST.
+      const normalized = decodeURIComponent(filePath).replace(/\\/g, "/");
+      if (normalized.includes("..") || normalized.includes("\0")) {
+        res.writeHead(400, { "Content-Type": "text/plain" });
+        res.end("bad request");
+        return;
+      }
+      const fullPath = join(WEB_DIST, normalized);
+      if (existsSync(fullPath) && fullPath.startsWith(WEB_DIST)) {
         const ext = filePath.split(".").pop();
         const types: Record<string, string> = {
           html: "text/html; charset=utf-8",
@@ -231,7 +260,7 @@ export function startServer(options: { silent?: boolean; open?: boolean } = {}):
   });
 
   server.listen(PORT, "127.0.0.1", () => {
-    const url = `http://localhost:${PORT}`;
+    const url = `http://localhost:${PORT}/?token=${dashboardToken}`;
     if (!options.silent) process.stderr.write(`📊 ${url}\n`);
     if (options.open !== false) openBrowser(url);
   });

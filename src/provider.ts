@@ -93,9 +93,18 @@ export function createProviderClient(
     ...(baseURL ? { baseURL } : {}),
   };
   // When an observer sink is provided, wrap fetch so every HTTP attempt
-  // (original + retries) is captured for the dashboard.
+  // (original + retries) is captured for the dashboard. We also redact the
+  // apiKey from any captured URL/error string, since a custom provider's
+  // baseURL or the SDK's error messages can echo it back.
   if (onFetch) {
-    options.fetch = createObservableFetch(onFetch) as ClientOptions["fetch"];
+    const apiKey = config.apiKey;
+    const redactingSink = (capture: HttpRequestCapture) => {
+      if (apiKey && capture.error) {
+        capture = { ...capture, error: capture.error.split(apiKey).join("[redacted]") };
+      }
+      onFetch(capture);
+    };
+    options.fetch = createObservableFetch(redactingSink) as ClientOptions["fetch"];
   }
   return factory(options);
 }

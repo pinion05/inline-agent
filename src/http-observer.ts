@@ -47,6 +47,8 @@ export type FetchLike = (
 
 export type CaptureSink = (capture: HttpRequestCapture) => void;
 
+export { RETRY_COUNT_HEADER };
+
 /** Header keys that carry secrets and must never be recorded. */
 const SECRET_HEADER_KEYS = [
   "authorization",
@@ -59,6 +61,14 @@ const SECRET_HEADER_KEYS = [
 ];
 
 let nextCaptureId = 1;
+
+/**
+ * Header the OpenAI SDK stamps on each fetch attempt to indicate the retry
+ * count ('0' for the original, '1' for the first retry, etc.). If the SDK
+ * ever renames this, captures will silently all read as attempt 0 — the
+ * integration test pins this contract.
+ */
+const RETRY_COUNT_HEADER = "x-stainless-retry-count";
 
 /**
  * Wrap a real fetch so every call (original + retries) produces a safe
@@ -104,7 +114,7 @@ export function createObservableFetch(
       const capture: HttpRequestCapture = {
         id: nextCaptureId++,
         timestamp,
-        url: urlString(url),
+        url: scrubUrl(urlString(url)),
         method: (init?.method ?? "GET").toUpperCase(),
         body: bodySnapshot,
         headers: safeHeaders,
@@ -125,7 +135,7 @@ export function createObservableFetch(
 /** Read the SDK's retry-count header to determine the attempt number. */
 function parseRetryCount(headers: HeadersInit | undefined): number {
   if (!headers) return 0;
-  const value = headerValue(headers, "x-stainless-retry-count");
+  const value = headerValue(headers, RETRY_COUNT_HEADER);
   if (value === null) return 0;
   const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) ? 0 : parsed;
@@ -188,4 +198,31 @@ function urlString(url: RequestInfo | URL): string {
   if (url instanceof URL) return url.toString();
   if (url instanceof Request) return url.url;
   return String(url);
+}
+
+/**
+ * Strip credentials from a URL before recording it:
+ * - userinfo (user:pass@host) is removed
+ * - secret-looking query params (api_key, key, token, ...) are dropped
+ *
+ * Custom OpenAI-compatible providers may embed credentials in the baseURL,
+ * and these would otherwise land in the dashboard capture verbatim.
+ */
+const SECRET_QUERY_KEYS = ["api_key", "apikey", "key", "token", "secret", "password", "access_token"];
+
+function scrubUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    url.username = "";
+    url.password = "";
+    for (const key of Array.from(url.searchParams.keys())) {
+      if (SECRET_QUERY_KEYS.includes(key.toLowerCase())) {
+        url.searchParams.delete(key);
+      }
+    }
+    return url.toString();
+  } catch {
+    // Not a parseable URL — return as-is rather than risk mangling it.
+    return raw;
+  }
 }
