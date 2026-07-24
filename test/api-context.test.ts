@@ -9,11 +9,6 @@ import { RUNTIME_TOOL_POLICY_PREFIX } from "../src/runtime-tool-policy.js";
 import { countRawToolActions } from "../src/trajectory.js";
 import { estimateRequestTokens } from "../src/context-projection.js";
 
-/** Drop the server-added `tokens` field so tests compare message structure. */
-function withoutTokens(messages: Message[]): Message[] {
-  return messages.map(({ tokens: _tokens, ...rest }) => rest as Message);
-}
-
 test("captures the exact request-only system prompt, messages, and tools", async () => {
   let sentMessages: Message[] = [];
   let sentTools: unknown[] = [];
@@ -59,7 +54,7 @@ test("captures the exact request-only system prompt, messages, and tools", async
   );
 
   const snapshot = getSnapshot();
-  assert.deepEqual(withoutTokens(snapshot.apiMessages), sentMessages);
+  assert.deepEqual(snapshot.apiMessages, sentMessages);
   assert.deepEqual(snapshot.apiTools, sentTools);
   assert.equal(sentReasoning, "high");
   assert.equal(snapshot.apiModel, "test-model");
@@ -156,7 +151,7 @@ test("reloads the system prompt before every tool-loop API call", async () => {
     "assistant",
   ]);
   assert.equal(messages.some((message) => message.role === "system"), false);
-  assert.deepEqual(withoutTokens(getSnapshot().apiMessages), sentRequests[1]);
+  assert.deepEqual(getSnapshot().apiMessages, sentRequests[1]);
   assert.equal(getSnapshot().apiReasoningEffort, "low");
 });
 
@@ -217,7 +212,7 @@ test("reloads the maximum tool-call policy inside one active loop", async () => 
   assert.equal(messages.some((message) => (
     message.content.startsWith(RUNTIME_TOOL_POLICY_PREFIX)
   )), false);
-  assert.deepEqual(withoutTokens(getSnapshot().apiMessages), requests[1]);
+  assert.deepEqual(getSnapshot().apiMessages, requests[1]);
 });
 
 test("sends a request-only projection while retaining the canonical raw ring", async () => {
@@ -267,7 +262,7 @@ test("sends a request-only projection while retaining the canonical raw ring", a
 
   assert.equal(countRawToolActions(messages), 4);
   assert.equal(countRawToolActions(requests.at(-1)!), 1);
-  assert.deepEqual(withoutTokens(getSnapshot().apiMessages), requests.at(-1));
+  assert.deepEqual(getSnapshot().apiMessages, requests.at(-1));
   assert.equal(getSnapshot().stats.configuredRawActions, 1);
   assert.equal(getSnapshot().stats.effectiveRawActions, 1);
   assert.ok(getSnapshot().stats.currentProjectionTokens > 0);

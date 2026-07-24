@@ -63,10 +63,8 @@ export interface Stats {
 export function getSnapshot() {
   return {
     stats: currentStats,
-    apiMessages: lastApiMessages.map((m) => ({
-      ...m,
-      tokens: estimateMessageTokens(m),
-    })),
+    apiMessages: lastApiMessages,
+    messageTokens: lastApiMessages.map((m) => estimateMessageTokens(m)),
     apiTools: lastApiTools,
     apiModel: lastApiModel,
     apiReasoningEffort: lastApiReasoningEffort,
@@ -75,7 +73,6 @@ export function getSnapshot() {
       content: m.content ?? "",
       toolCalls: m.tool_calls,
       toolCallId: m.tool_call_id,
-      tokens: estimateMessageTokens(m),
     })),
   };
 }

@@ -11,7 +11,6 @@ interface ApiMessage {
   content: string;
   tool_call_id?: string;
   tool_calls?: ToolCall[];
-  tokens?: number;
 }
 
 interface Stats {
@@ -37,6 +36,7 @@ interface Stats {
 interface Snapshot {
   stats: Stats;
   apiMessages: ApiMessage[];
+  messageTokens: number[];
   apiTools: unknown[];
   apiModel: string | null;
   apiReasoningEffort: string | null;
@@ -60,6 +60,7 @@ function normalizeSnapshot(next: Snapshot): Snapshot {
       })),
     },
     apiMessages: next.apiMessages ?? [],
+    messageTokens: next.messageTokens ?? [],
     apiTools: next.apiTools ?? [],
     apiModel: next.apiModel ?? null,
     apiReasoningEffort: next.apiReasoningEffort ?? null,
@@ -104,6 +105,7 @@ export default function ContextApp() {
       lastAction: 'connecting...',
     },
     apiMessages: [],
+    messageTokens: [],
     apiTools: [],
     apiModel: null,
     apiReasoningEffort: null,
@@ -121,8 +123,8 @@ export default function ContextApp() {
 
   onCleanup(() => es?.close());
 
-  const apiTokens = () => snapshot().apiMessages.reduce(
-    (total, message) => total + (message.tokens ?? 0),
+  const apiTokens = () => snapshot().messageTokens.reduce(
+    (total, tokens) => total + tokens,
     Math.ceil(JSON.stringify(snapshot().apiTools).length / 4),
   );
 
@@ -242,7 +244,7 @@ export default function ContextApp() {
         )}
       >
         <For each={snapshot().apiMessages}>
-          {(msg, i) => <ApiMessageCard msg={msg} index={i()} />}
+          {(msg, i) => <ApiMessageCard msg={msg} index={i()} tokens={snapshot().messageTokens[i()] ?? 0} />}
         </For>
       </Show>
     </div>
@@ -266,7 +268,7 @@ function Stat(props: { label: string; value: string; color?: string }) {
   );
 }
 
-function ApiMessageCard(props: { msg: ApiMessage; index: number }) {
+function ApiMessageCard(props: { msg: ApiMessage; index: number; tokens: number }) {
   const compressed = () => isCompressedMessage(props.msg);
   const color = () => compressed()
     ? COMPRESSED_COLOR
@@ -296,7 +298,7 @@ function ApiMessageCard(props: { msg: ApiMessage; index: number }) {
           'font-size': '9px', padding: '1px 6px', 'border-radius': '10px',
           background: '#21262d', color: '#8b949e',
         }}>
-          ~{props.msg.tokens ?? '?'} tok
+          ~{props.tokens} tok
         </span>
       </div>
 
