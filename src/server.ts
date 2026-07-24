@@ -68,12 +68,6 @@ export function getSnapshot() {
     apiTools: lastApiTools,
     apiModel: lastApiModel,
     apiReasoningEffort: lastApiReasoningEffort,
-    messages: currentMessages.map((m) => ({
-      role: m.role,
-      content: m.content ?? "",
-      toolCalls: m.tool_calls,
-      toolCallId: m.tool_call_id,
-    })),
   };
 }
 

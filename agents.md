@@ -64,14 +64,18 @@ git push origin master # CI가 자동 게시 + GitHub Release 생성
 대시보드(`http://localhost:7878`)와 SSE snapshot은 **"API에 실제로 전송되는 내용"의 투명한 거울**이어야 한다. 이 무결성은 절대 절대 절대로 깨뜨리면 안 된다.
 
 **규칙:**
+- **웹에 보내는 것은 무조건 API에 실제로 전송되는 데이터만.** 그 외的一切(캐노니컬 원본, 압축 전 메시지, 서버 내부 상태)은 snapshot에 넣지 않는다.
 - `getSnapshot().apiMessages`는 **API 요청에 들어가는 원본 메시지와 바이트 단위로 동일**해야 한다. 계산 필드(`tokens`, `estimatedXxx` 등)를 메시지 객체 안에 끼워넣지 말 것.
 - 토큰 수 등 부가 정보는 **별도 배열/필드**로 분리한다. 현재 구조:
   - `apiMessages: Message[]` — 순수 원본 (`{role, content, tool_calls, ...}`, API 전송본과 동일)
   - `messageTokens: number[]` — 메시지 순서에 대응하는 토큰 수 (별도)
+  - `apiTools` / `apiModel` / `apiReasoningEffort` — 모두 API 요청 메타데이터
 - dashboard의 "메시지 전체 원문 JSON"은 `apiMessages[i]`를 그대로 직렬화한다. 여기에 `tokens` 같은 비원본 필드가 보이면 **무결성 위반**이다.
 - 웹 UI에 "원문"이라고 라벨링한 것은 **무조건 API 실제 내용**이어야 한다. 시각적 편의를 위해 계산값을 끼워넣지 말 것.
 
-**과거 삽질:** 토큰 수 표시를 위해 `apiMessages`의 각 메시지에 `tokens` 필드를 주입했더니, dashboard의 "전체 원문 JSON"에 `tokens: 41`이 섞여 나와 "이게 API로 가는 거 아냐?"라는 혼란을 유발했다. 기능적으로는 전송에 문제가 없었지만 **"원문" 라벨의 신뢰성**이 깨졌다. 계산 필드는 반드시 원본과 분리할 것.
+**과거 삽질 (2건):**
+1. **`tokens` 주입:** 토큰 수 표시를 위해 `apiMessages`의 각 메시지에 `tokens` 필드를 주입했더니, dashboard의 "전체 원문 JSON"에 `tokens: 41`이 섞여 나와 "이게 API로 가는 거 아냐?"라는 혼란을 유발했다. 계산 필드는 `messageTokens` 별도 배열로 분리해서 해결.
+2. **canonical `messages` 전송:** snapshot에 `messages`(압축 전 캐노니컬 원본)를 같이 보냈다. 이건 API에 전송되지 않는 내부 데이터인데 웹에 노출돼 무결성을 해쳤다. `apiMessages`(실제 API 전송본)만 남기고 제거.
 
 ## 디버깅 (배포 실패 시)
 
