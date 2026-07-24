@@ -129,7 +129,10 @@ export default function ContextApp() {
   let es: EventSource | undefined;
 
   onMount(() => {
-    es = new EventSource('/events');
+    // The server opens this page with ?token=<per-process-token> and requires
+    // it on /events. Without it the SSE connection is rejected (403).
+    const token = new URLSearchParams(window.location.search).get('token') ?? '';
+    es = new EventSource(`/events?token=${encodeURIComponent(token)}`);
     es.onmessage = (e) => setSnapshot(normalizeSnapshot(JSON.parse(e.data)));
     es.onerror = () => {
       const s = snapshot();
